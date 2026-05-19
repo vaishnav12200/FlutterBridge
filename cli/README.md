@@ -10,26 +10,26 @@ Bridge your Flutter code to your phone instantly. No USB cables. No complex ADB 
 
 ```bash
 # Using npm
-npm install -g flutterbridge
+npm install -g @vaishnavkm/flutterbridge
 
 # Using pnpm
-pnpm add -g flutterbridge
+pnpm add -g @vaishnavkm/flutterbridge
 
 # Using bun
-bun add -g flutterbridge
+bun add -g @vaishnavkm/flutterbridge
 ```
 
 ### One-time Use (No Installation)
 
 ```bash
 # Using npm
-npx flutterbridge
+npx @vaishnavkm/flutterbridge
 
 # Using pnpm
-pnpm dlx flutterbridge
+pnpm dlx @vaishnavkm/flutterbridge
 
 # Using bun
-bunx flutterbridge
+bunx @vaishnavkm/flutterbridge
 ```
 
 ## Usage

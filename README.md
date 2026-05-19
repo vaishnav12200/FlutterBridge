@@ -33,7 +33,7 @@ It enables:
 | Device selection & error handling | ✅ Done |
 | CLI flags (--device, --qr-only, --json) | ✅ Done |
 | LAN IP rewriting | ✅ Done |
-| NPM package ready | ✅ Done |
+| NPM package published (npm/pnpm/bun) | ✅ Done |
 | Hot reload over WiFi | 📅 Planned (Phase 2) |
 | Companion Android app | 📅 Planned (Phase 2) |
 | iOS support | 📅 Planned (Phase 5) |
@@ -181,7 +181,7 @@ All Phase 1 objectives have been achieved:
 - ✅ CLI flags: `--device`, `--qr-only`, `--json`
 - ✅ LAN IP rewriting for wireless connectivity
 - ✅ Chrome web hostname auto-configuration
-- ✅ NPM package ready (works with npm, pnpm, and bun)
+- ✅ NPM package published (npm/pnpm/bun supported)
 - ✅ Complete documentation and contribution guidelines
 
 **The CLI is production-ready and fully functional!**
@@ -212,7 +212,7 @@ Upcoming work:
         - `--json` for machine-readable output (future automation).
 4. **Packaging and distribution** ✅
         - Package configured for npm publishing.
-        - Ready to support `npx flutterbridge` and `npm i -g flutterbridge`.
+        - Published as `@vaishnavkm/flutterbridge` with `npx` and global install support.
 
 ### Phase 2 — Companion app MVP
 1. **QR scanner screen**

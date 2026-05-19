@@ -11,8 +11,8 @@ This roadmap is ordered. Each milestone builds on the previous one.
 - [x] CLI flags: `--device`, `--qr-only`, `--json`
 - [x] LAN IP rewriting for wireless connectivity
 - [x] Chrome web hostname auto-configuration
-- [x] Package configuration for npm publishing
-- [x] Ready to publish: `npx flutterbridge` support
+- [x] Package published to npm registry
+- [x] Available via npm/pnpm/bun (`@vaishnavkm/flutterbridge`)
 
 ## Milestone 2: Companion app MVP
 - [ ] QR scanner screen with permissions
