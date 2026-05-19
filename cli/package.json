@@ -1,10 +1,13 @@
 {
-  "name": "flutterbridge",
+  "name": "@vaishnavkm/flutterbridge",
   "version": "0.1.0",
   "description": "Bridge your Flutter code to your phone instantly. Wireless development with QR code pairing.",
   "main": "index.js",
   "bin": {
     "flutterbridge": "./index.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -92,22 +92,22 @@ flutterbridge/
 
 ```bash
 # Using npm
-npm install -g flutterbridge
+npm install -g @vaishnavkm/flutterbridge
 
 # Using pnpm
-pnpm add -g flutterbridge
+pnpm add -g @vaishnavkm/flutterbridge
 
 # Using bun
-bun add -g flutterbridge
+bun add -g @vaishnavkm/flutterbridge
 
 # Or use without installation (npm)
-npx flutterbridge
+npx @vaishnavkm/flutterbridge
 
 # Or use without installation (pnpm)
-pnpm dlx flutterbridge
+pnpm dlx @vaishnavkm/flutterbridge
 
 # Or use without installation (bun)
-bunx flutterbridge
+bunx @vaishnavkm/flutterbridge
 ```
 
 #### Option 2: From Source
@@ -127,9 +127,9 @@ Navigate to your Flutter project and run:
 flutterbridge
 
 # Or without installation
-npx flutterbridge      # npm
-pnpm dlx flutterbridge # pnpm
-bunx flutterbridge     # bun
+npx @vaishnavkm/flutterbridge      # npm
+pnpm dlx @vaishnavkm/flutterbridge # pnpm
+bunx @vaishnavkm/flutterbridge     # bun
 
 # Or from source
 node /path/to/flutterbridge/cli/index.js
