@@ -42,6 +42,9 @@ flutterbridge
 
 A QR code will appear in your terminal. Scan it with the FlutterBridge companion app to connect.
 
+If the VM service is bound to localhost, FlutterBridge will start a LAN proxy
+and encode that address in the QR so phones can connect over WiFi.
+
 ## CLI Options
 
 ```bash

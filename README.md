@@ -137,6 +137,9 @@ node /path/to/flutterbridge/cli/index.js
 
 You will see a QR code appear in your terminal.
 
+If the VM service is bound to localhost, FlutterBridge will start a LAN proxy
+and encode that address in the QR so phones can connect over WiFi.
+
 ### CLI Options
 
 ```bash

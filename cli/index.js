@@ -7,6 +7,7 @@ const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const net = require('net');
 
 const VM_URL_TIMEOUT_MS = 60000;
 const SERVICE_URI_KEYS = [
@@ -17,6 +18,8 @@ const SERVICE_URI_KEYS = [
   'debugWsUri',
   'wsUri',
 ];
+
+const activeProxies = new Set();
 
 function parseArgs(argv) {
   let deviceId = null;
@@ -169,25 +172,103 @@ function getLanIp() {
   return candidates[0];
 }
 
-function rewriteVmServiceUrl(originalUrl) {
+function getDefaultPort(protocol) {
+  if (protocol === 'wss:' || protocol === 'https:') {
+    return 443;
+  }
+  if (protocol === 'ws:' || protocol === 'http:') {
+    return 80;
+  }
+  return null;
+}
+
+function registerProxy(server) {
+  activeProxies.add(server);
+  server.on('close', () => activeProxies.delete(server));
+}
+
+function closeAllProxies() {
+  for (const server of activeProxies) {
+    try {
+      server.close();
+    } catch (_) {
+      // Ignore errors while shutting down.
+    }
+  }
+  activeProxies.clear();
+}
+
+process.on('exit', closeAllProxies);
+
+function startTcpProxy(targetHost, targetPort) {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer((client) => {
+      const upstream = net.connect({ host: targetHost, port: targetPort });
+
+      const closeBoth = () => {
+        client.destroy();
+        upstream.destroy();
+      };
+
+      client.on('error', closeBoth);
+      upstream.on('error', closeBoth);
+
+      client.pipe(upstream);
+      upstream.pipe(client);
+    });
+
+    server.on('error', reject);
+
+    server.listen(0, '0.0.0.0', () => {
+      registerProxy(server);
+      const address = server.address();
+      resolve({ server, port: address.port });
+    });
+  });
+}
+
+async function prepareVmServiceUrl(originalUrl) {
+  let parsed;
   try {
-    const parsed = new URL(originalUrl);
-    if (!isLoopbackHost(parsed.hostname)) {
-      return { url: originalUrl, replaced: false };
-    }
-
-    const lanIp = getLanIp();
-    if (!lanIp) {
-      console.warn(chalk.yellow('\n⚠️  Warning: Could not detect LAN IP address.'));
-      console.warn(chalk.yellow('Make sure your PC and phone are on the same WiFi network.'));
-      console.warn(chalk.yellow('Connection may fail with localhost URL.\n'));
-      return { url: originalUrl, replaced: false };
-    }
-
-    parsed.hostname = lanIp;
-    return { url: parsed.toString(), replaced: true };
+    parsed = new URL(originalUrl);
   } catch (_) {
-    return { url: originalUrl, replaced: false };
+    return { url: originalUrl, originalUrl, replaced: false, proxied: false };
+  }
+
+  if (!isLoopbackHost(parsed.hostname)) {
+    return { url: originalUrl, originalUrl, replaced: false, proxied: false };
+  }
+
+  const lanIp = getLanIp();
+  if (!lanIp) {
+    console.warn(chalk.yellow('\n⚠️  Warning: Could not detect LAN IP address.'));
+    console.warn(chalk.yellow('Make sure your PC and phone are on the same WiFi network.'));
+    console.warn(chalk.yellow('Connection may fail with localhost URL.\n'));
+    return { url: originalUrl, originalUrl, replaced: false, proxied: false };
+  }
+
+  const port = parsed.port ? Number(parsed.port) : getDefaultPort(parsed.protocol);
+  if (!port) {
+    return { url: originalUrl, originalUrl, replaced: false, proxied: false };
+  }
+
+  const targetHost = parsed.hostname === '0.0.0.0' ? '127.0.0.1' : parsed.hostname;
+  try {
+    const proxy = await startTcpProxy(targetHost, port);
+    parsed.hostname = lanIp;
+    parsed.port = String(proxy.port);
+    return {
+      url: parsed.toString(),
+      originalUrl,
+      replaced: true,
+      proxied: true,
+      proxyHost: lanIp,
+      proxyPort: proxy.port,
+    };
+  } catch (err) {
+    console.warn(chalk.yellow(`\n⚠️  Warning: Failed to start LAN proxy (${err.message}).`));
+    parsed.hostname = lanIp;
+    return { url: parsed.toString(), originalUrl, replaced: true, proxied: false };
   }
 }
 
@@ -395,6 +476,7 @@ async function main() {
   let stdoutBuffer = '';
   let stderrBuffer = '';
   let vmServiceUrl = null;
+  let publishPending = false;
 
   const vmTimeout = setTimeout(() => {
     if (!vmServiceUrl) {
@@ -420,29 +502,56 @@ async function main() {
       const events = Array.isArray(json) ? json : [json];
       for (const event of events) {
         const url = extractVmServiceUri(event);
-        if (url && !vmServiceUrl) {
-          const rewritten = rewriteVmServiceUrl(url);
-          vmServiceUrl = rewritten.url;
-          clearTimeout(vmTimeout);
-          if (jsonOutput) {
-            const payload = { vmServiceUri: vmServiceUrl, deviceId };
-            if (rewritten.replaced) {
-              payload.originalVmServiceUri = url;
+        if (url && !vmServiceUrl && !publishPending) {
+          publishPending = true;
+
+          const publishUrl = (result) => {
+            if (vmServiceUrl) {
+              return;
             }
-            console.log(JSON.stringify(payload));
-          } else {
+            vmServiceUrl = result.url;
+            clearTimeout(vmTimeout);
+
+            if (jsonOutput) {
+              const payload = { vmServiceUri: vmServiceUrl, deviceId };
+              if (result.replaced) {
+                payload.originalVmServiceUri = result.originalUrl;
+              }
+              if (result.proxied) {
+                payload.proxy = { host: result.proxyHost, port: result.proxyPort };
+              }
+              console.log(JSON.stringify(payload));
+              return;
+            }
+
             if (!qrOnly) {
               console.log(chalk.yellow('\nScan this QR with FlutterBridge app:\n'));
             }
             qrcode.generate(vmServiceUrl, { small: true });
             if (!qrOnly) {
-              if (rewritten.replaced) {
+              if (result.proxied) {
+                console.log(chalk.gray(`LAN proxy running at ws://${result.proxyHost}:${result.proxyPort}`));
+                console.log(chalk.gray(`Proxy target: ${result.originalUrl}`));
+              } else if (result.replaced) {
                 console.log(chalk.gray(`Rewrote VM URL for LAN access: ${vmServiceUrl}`));
-                console.log(chalk.gray(`Original VM URL: ${url}`));
+                console.log(chalk.gray(`Original VM URL: ${result.originalUrl}`));
               }
               console.log(chalk.green(`\nVM URL: ${vmServiceUrl}`));
             }
-          }
+          };
+
+          prepareVmServiceUrl(url)
+            .then((result) => {
+              publishPending = false;
+              publishUrl(result);
+            })
+            .catch((err) => {
+              publishPending = false;
+              if (!quiet) {
+                console.error(chalk.red(`Failed to prepare VM service URL: ${err.message}`));
+              }
+              publishUrl({ url, originalUrl: url, replaced: false, proxied: false });
+            });
         }
       }
     }
