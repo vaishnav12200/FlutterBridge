@@ -191,11 +191,11 @@ All Phase 1 objectives have been achieved:
 
 ### 🚧 Phase 2: Companion App MVP — NEXT
 
-Upcoming work:
-- QR scanner screen with camera permissions
-- VM service WebSocket connection
-- Basic status UI (connected/disconnected/error)
-- Hot reload trigger and status display
+- QR scanner UX, URL validation, manual input fallback
+- VM service WebSocket connection with reconnect + token validation
+- Hot reload + hot restart controls with status
+- Remote logs panel with filters and timestamps
+- Bottom navigation: Home / Logs / Devices / Settings
 
 ---
 
@@ -217,40 +217,148 @@ Upcoming work:
         - Package configured for npm publishing.
         - Published as `@vaishnavkm/flutterbridge` with `npx` and global install support.
 
-### Phase 2 — Companion app MVP
-1. **QR scanner screen**
-        - Use camera permissions + scanner UI.
-        - Validate and display the scanned URL.
-2. **VM service connection**
-        - Connect via WebSocket to `vmServiceUri`.
-        - Basic status UI: connected/disconnected + error messages.
-3. **App display and hot reload**
-        - Wire Flutter tool protocol to trigger hot reload.
-        - Show reload status and errors.
+### Phase 2 — Companion App MVP 🚧 NEXT
 
-### Phase 3 — Networking + security
-1. **Same-LAN reliability**
-        - Detect local IP and verify device reachability.
-        - Offer troubleshooting hints if the phone cannot connect.
-2. **Optional secure pairing**
-        - Embed a short token in the QR.
-        - Validate token on connect; reject mismatches.
+The companion app is the heart of FlutterBridge. This phase delivers a working
+Android app that connects to the CLI over WiFi and gives developers a real-time
+window into their running Flutter app.
 
-### Phase 4 — Developer experience + docs
-1. **Clean, informative logs**
-        - Status UI in CLI (device, VM URL, QR state).
-2. **Documentation and troubleshooting**
-        - How to run, common failures, firewall notes.
-        - Add quickstart + demo gif.
-3. **CI + tests**
-        - Unit tests for VM URL parsing and device selection.
-        - Linting and release workflow.
+#### 2.1 QR Scanner Screen
+- Camera permission handling with graceful fallback UI
+- Real-time QR scanning using `mobile_scanner` package
+- URL validation — reject malformed or non-FlutterBridge QR codes
+- Manual URL input fallback (paste the URL shown in terminal)
+- Visual feedback: scanning → connecting → connected states
 
-### Phase 5 — Platform expansion
-1. **iOS support**
-        - Device discovery, pairing, and connection parity.
-2. **Plugin support / advanced integrations**
-        - Evaluate compatibility issues and document limits.
+#### 2.2 VM Service WebSocket Connection
+- Parse scanned URL and establish WebSocket to `vmServiceUri`
+- Connection state management: connecting / connected / disconnected / error
+- Auto-reconnect with exponential backoff if WiFi drops
+- Clear error messages with actionable hints (wrong network, firewall, etc.)
+- Token validation for secure pairing (matches token embedded in QR)
+
+#### 2.3 Hot Reload from Phone
+- One-tap hot reload button in the companion app
+- Invokes `callServiceExtension('hotReload')` over VM service WebSocket
+- Shows reload status: triggered → rebuilding → done / error
+- Reload duration display (e.g. "Hot reload in 312ms")
+- Hot restart support as a secondary option
+
+#### 2.4 Remote Logs
+- Stream live logs via `streamListen('Logging')` over VM service
+- Filter tabs: All / Debug / Info / Warn / Error
+- Color-coded log levels matching Flutter's log severity
+- Timestamp display per log entry
+- Source file + line number shown below each log
+- Clear logs button and auto-scroll toggle
+
+#### 2.5 Bottom Navigation
+- **Home** — connection status, device info, quick actions
+- **Logs** — live log stream with filters
+- **Devices** — list of connected/available devices
+- **Settings** — app preferences, connection history
+
+---
+
+### Phase 3 — Networking + Security + Reliability 🔒
+
+#### 3.1 Robust LAN Connectivity
+- Detect and display local IP automatically in CLI
+- Verify phone can reach the host before showing QR (ping check)
+- Firewall detection — warn if port is blocked with fix instructions
+- Multi-network interface support (pick the right IP when multiple adapters exist)
+- Proxy server built into CLI for localhost-bound VM URLs (already partially done)
+
+#### 3.2 Secure Pairing
+- Generate a short random token per session (embedded in QR)
+- CLI WebSocket server validates token on every connection attempt
+- Reject and log unauthorized connection attempts
+- Session expiry — token invalidates after disconnect or timeout
+- Optional persistent pairing: remember trusted devices by fingerprint
+
+#### 3.3 Stability & Error Recovery
+- CLI watches for `flutter run` crashes and notifies companion app
+- Companion app detects stale connections and prompts reconnect
+- Handle VM service port changes between hot restarts
+- Detailed error codes with user-facing fix suggestions
+- Unit tests for VM URL parsing, device selection, and token validation
+
+---
+
+### Phase 4 — Live Screen Streaming (Expo-like Preview) 📡
+
+This is the flagship feature — making FlutterBridge feel truly like Expo. The
+companion app shows a **live video stream** of the running Flutter app, so the
+phone becomes a real-time preview window.
+
+#### 4.1 Screen Capture Pipeline
+- CLI pushes a lightweight capture server to the Android device via ADB (scrcpy protocol)
+- Capture server uses Android `MediaCodec` to encode screen as H.264 in real-time
+- No permission popup — uses internal Android display APIs (same approach as scrcpy)
+- Frames streamed from device → CLI over ADB socket tunnel
+
+#### 4.2 MJPEG Streaming (Phase 4 Alpha)
+- CLI receives frames and re-encodes as MJPEG
+- Companion app connects to MJPEG endpoint over HTTP on LAN
+- Renders live preview at ~10–15 fps — good enough for UI inspection
+- Low implementation complexity, ships fast as a proof of concept
+- Shown fullscreen in companion app with overlay controls
+
+#### 4.3 WebRTC Streaming (Phase 4 Full)
+- Replace MJPEG with WebRTC peer connection for true low-latency streaming
+- CLI acts as WebRTC signaling server (via existing WebSocket)
+- H.264 encoded stream delivered peer-to-peer over LAN
+- Target: 30–60 fps, < 150ms latency on local WiFi
+- Uses `flutter_webrtc` package in companion app for rendering
+- Adaptive quality — drops resolution if network degrades
+
+#### 4.4 Preview UI in Companion App
+- Full-screen live preview tab added to bottom navigation
+- Device frame overlay (Pixel, iPhone shape) around the stream
+- Pinch to zoom, tap to focus controls
+- Screenshot capture button — saves frame to phone gallery
+- Stream quality indicator (fps, latency, resolution)
+
+#### 4.5 Emulator Support
+- For emulators (no physical device), CLI captures the emulator window directly
+- Uses `adb emu screenrecord` or virtual display capture
+- Same WebRTC pipeline, no ADB push needed for emulator targets
+
+---
+
+### Phase 5 — Platform Expansion + Advanced Features 🌐
+
+#### 5.1 Touch Forwarding
+- Tap events on the companion app preview are forwarded back to the running Flutter app
+- CLI receives touch coordinates from companion → injects via ADB input
+- Supports: tap, swipe, scroll, long press
+- Coordinate mapping accounts for stream scaling and device frame offset
+- Makes the companion app a full remote control for the running app
+
+#### 5.2 iOS Support
+- iOS device discovery via `ios-deploy` or Xcode instruments
+- VM service URL extraction from `flutter run` targeting iOS simulator / device
+- Same QR pairing flow, same companion app (cross-platform Flutter)
+- Screen capture via `ReplayKit` framework on iOS
+- Note: iOS streaming has stricter privacy restrictions than Android — handled with explicit user prompt
+
+#### 5.3 Multi-Device Support
+- Run FlutterBridge once, connect multiple phones simultaneously
+- Each device gets its own stream and log view
+- CLI manages multiple ADB sessions in parallel
+- Companion app shows device switcher when multiple sessions are active
+- Useful for testing responsive layouts across screen sizes at once
+
+#### 5.4 Plugin Support & Compatibility Layer
+- Document known incompatible plugins (camera, bluetooth, etc. need real device)
+- Compatibility checker in CLI warns before running if incompatible plugins detected
+- Plugin override hooks for common packages
+
+#### 5.5 CI/CD & Automation Integration
+- `--json` flag output stable and documented for scripting
+- GitHub Actions example workflow using FlutterBridge for device testing
+- Slack / webhook notification on crash or hot reload failure
+- Screenshot diff tool — compare frames across builds automatically
 
 ---
 
