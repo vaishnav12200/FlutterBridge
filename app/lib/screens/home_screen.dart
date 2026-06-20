@@ -184,7 +184,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       'jsonrpc': '2.0',
       'id': _nextId++,
       'method': method,
-      if (params != null) 'params': params,
+      ...?params,
     }));
   }
 
