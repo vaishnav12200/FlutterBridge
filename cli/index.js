@@ -10,7 +10,7 @@ const path = require('path');
 const os = require('os');
 const net = require('net');
 
-const VM_URL_TIMEOUT_MS = 60000;
+const VM_URL_TIMEOUT_MS = 300000; // 5 minutes (initial gradle builds take time)
 const SERVICE_URI_KEYS = [
   'vmServiceUri',
   'observatoryUri',
