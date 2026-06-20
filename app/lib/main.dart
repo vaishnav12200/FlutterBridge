@@ -5,6 +5,7 @@ import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/logs_screen.dart';
+import 'screens/devices_screen.dart';
 import 'screens/placeholder_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,11 +80,7 @@ class _MainShellState extends State<MainShell> {
         onScanAgain: _onScanAgain,
       ),
       const LogsScreen(),
-      const PlaceholderScreen(
-        title: 'Devices',
-        icon: Icons.phone_android_rounded,
-        comingSoon: 'Screen 4 — Device manager',
-      ),
+      const DevicesScreen(),
       const PlaceholderScreen(
         title: 'Settings',
         icon: Icons.tune_rounded,
