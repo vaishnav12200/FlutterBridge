@@ -6,7 +6,7 @@ import 'screens/home_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/logs_screen.dart';
 import 'screens/devices_screen.dart';
-import 'screens/placeholder_screen.dart';
+import 'screens/settings_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entry Point
@@ -81,11 +81,7 @@ class _MainShellState extends State<MainShell> {
       ),
       const LogsScreen(),
       const DevicesScreen(),
-      const PlaceholderScreen(
-        title: 'Settings',
-        icon: Icons.tune_rounded,
-        comingSoon: 'Screen 5 — App preferences',
-      ),
+      const SettingsScreen(),
     ];
 
     return Scaffold(
