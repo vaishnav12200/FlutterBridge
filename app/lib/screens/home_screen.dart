@@ -1,20 +1,16 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../theme/app_theme.dart';
+import '../services/vm_connection_manager.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State enums
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum _ConnStatus { idle, connecting, connected, error }
-
-enum _ReloadState { idle, loading, success, error }
+typedef _ReloadState = VMReloadState;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HomeScreen
@@ -34,29 +30,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  // ── WebSocket ─────────────────────────────────────────────────────────────
-  WebSocketChannel? _channel;
-  StreamSubscription<dynamic>? _sub;
-  Timer? _connTimeout;
-  int _nextId = 1;
-
-  // ── Connection state ──────────────────────────────────────────────────────
-  _ConnStatus _status = _ConnStatus.idle;
-  String? _errorMsg;
-  String? _deviceName;
-  String? _dartVersion;
-  String? _isolateId;
-
-  // ── Uptime ────────────────────────────────────────────────────────────────
-  Timer? _uptimeTimer;
-  Duration _uptime = Duration.zero;
-
-  // ── Reload state ──────────────────────────────────────────────────────────
-  _ReloadState _reloadState = _ReloadState.idle;
-  Duration? _lastReloadDuration;
-  DateTime? _reloadStart;
-  Timer? _reloadResetTimer;
-
   // ── Animations ────────────────────────────────────────────────────────────
   late final AnimationController _glowCtrl;
   late final AnimationController _shimmerCtrl;
@@ -79,9 +52,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       duration: const Duration(milliseconds: 1800),
     )..repeat();
 
-    if (widget.vmServiceUrl != null) {
+    VMConnectionManager.instance.addListener(_onVMStateChanged);
+
+    if (widget.vmServiceUrl != null &&
+        widget.vmServiceUrl != VMConnectionManager.instance.currentUrl) {
       WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _connect(widget.vmServiceUrl!),
+        (_) => VMConnectionManager.instance.connect(widget.vmServiceUrl!),
       );
     }
   }
@@ -90,194 +66,22 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void didUpdateWidget(HomeScreen old) {
     super.didUpdateWidget(old);
     if (widget.vmServiceUrl != old.vmServiceUrl &&
-        widget.vmServiceUrl != null) {
-      _connect(widget.vmServiceUrl!);
+        widget.vmServiceUrl != null &&
+        widget.vmServiceUrl != VMConnectionManager.instance.currentUrl) {
+      VMConnectionManager.instance.connect(widget.vmServiceUrl!);
     }
   }
 
   @override
   void dispose() {
-    _cleanup();
+    VMConnectionManager.instance.removeListener(_onVMStateChanged);
     _glowCtrl.dispose();
     _shimmerCtrl.dispose();
-    _uptimeTimer?.cancel();
-    _reloadResetTimer?.cancel();
     super.dispose();
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Connection management
-  // ─────────────────────────────────────────────────────────────────────────
-
-  void _connect(String url) {
-    _cleanup();
-    setState(() {
-      _status = _ConnStatus.connecting;
-      _errorMsg = null;
-      _deviceName = null;
-      _dartVersion = null;
-      _isolateId = null;
-      _uptime = Duration.zero;
-      _reloadState = _ReloadState.idle;
-      _lastReloadDuration = null;
-    });
-
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(url));
-    } catch (e) {
-      _setError('Invalid URL: $e');
-      return;
-    }
-
-    _connTimeout = Timer(const Duration(seconds: 12), () {
-      if (mounted && _status == _ConnStatus.connecting) {
-        _setError(
-          'Connection timed out.\n\nMake sure your PC and phone are on the same WiFi network.',
-        );
-      }
-    });
-
-    _sub = _channel!.stream.listen(
-      _onMessage,
-      onError: (e) => _setError('Connection error: $e'),
-      onDone: () {
-        if (mounted && _status == _ConnStatus.connected) {
-          _setError('Connection closed by the remote end.');
-        }
-      },
-    );
-
-    _send('getVM');
-  }
-
-  void _cleanup() {
-    _connTimeout?.cancel();
-    _sub?.cancel();
-    _sub = null;
-    _channel?.sink.close();
-    _channel = null;
-    _uptimeTimer?.cancel();
-  }
-
-  void _disconnect() {
-    _cleanup();
-    if (mounted) setState(() => _status = _ConnStatus.idle);
-  }
-
-  void _setError(String msg) {
-    _connTimeout?.cancel();
-    _uptimeTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _status = _ConnStatus.error;
-      _errorMsg = msg;
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Messaging
-  // ─────────────────────────────────────────────────────────────────────────
-
-  void _send(String method, {Map<String, dynamic>? params}) {
-    if (_channel == null) return;
-    _channel!.sink.add(jsonEncode({
-      'jsonrpc': '2.0',
-      'id': _nextId++,
-      'method': method,
-      // ignore: use_null_aware_elements
-      if (params != null) 'params': params,
-    }));
-  }
-
-  void _onMessage(dynamic raw) {
-    if (raw is! String) return;
-    Map<String, dynamic> msg;
-    try {
-      msg = jsonDecode(raw) as Map<String, dynamic>;
-    } catch (_) {
-      return;
-    }
-
-    final result = msg['result'];
-
-    if (result is Map<String, dynamic>) {
-      // getVM handshake response
-      if (result.containsKey('isolates')) {
-        _connTimeout?.cancel();
-        final isolates =
-            (result['isolates'] as List?)?.cast<Map<String, dynamic>>();
-        if (!mounted) return;
-        setState(() {
-          _status = _ConnStatus.connected;
-          _deviceName = result['name']?.toString() ?? 'Flutter Device';
-          _dartVersion = result['version']?.toString();
-          _isolateId = isolates?.firstOrNull?['id']?.toString();
-        });
-        _startUptime();
-        return;
-      }
-
-      // Any response while reload is in-flight = success
-      if (_reloadState == _ReloadState.loading) {
-        _finishReload(success: true);
-        return;
-      }
-    }
-
-    // JSON-RPC error while reload in-flight
-    if (msg.containsKey('error') && _reloadState == _ReloadState.loading) {
-      _finishReload(success: false);
-    }
-  }
-
-  void _finishReload({required bool success}) {
-    final elapsed = _reloadStart != null
-        ? DateTime.now().difference(_reloadStart!)
-        : null;
-    _reloadStart = null;
-    if (!mounted) return;
-    setState(() {
-      _reloadState = success ? _ReloadState.success : _ReloadState.error;
-      _lastReloadDuration = elapsed;
-    });
-    _reloadResetTimer?.cancel();
-    _reloadResetTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) setState(() => _reloadState = _ReloadState.idle);
-    });
-  }
-
-  void _startUptime() {
-    _uptimeTimer?.cancel();
-    _uptimeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _uptime += const Duration(seconds: 1));
-    });
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Actions
-  // ─────────────────────────────────────────────────────────────────────────
-
-  void _hotReload() {
-    if (_status != _ConnStatus.connected) return;
-    if (_reloadState == _ReloadState.loading) return;
-    setState(() {
-      _reloadState = _ReloadState.loading;
-      _reloadStart = DateTime.now();
-    });
-    _send('callServiceExtension', params: {
-      'isolateId': _isolateId,
-      'method': 'ext.flutter.reassemble',
-    });
-  }
-
-  void _hotRestart() {
-    if (_status != _ConnStatus.connected) return;
-    if (_reloadState == _ReloadState.loading) return;
-    setState(() {
-      _reloadState = _ReloadState.loading;
-      _reloadStart = DateTime.now();
-    });
-    _send('hotRestart', params: {'isolateId': _isolateId});
+  void _onVMStateChanged() {
+    if (mounted) setState(() {});
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -303,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── AppBar ────────────────────────────────────────────────────────────────
 
   PreferredSizeWidget _buildAppBar() {
+    final vm = VMConnectionManager.instance;
     return AppBar(
       title: Row(
         children: [
@@ -336,11 +141,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ],
       ),
       actions: [
-        if (_status == _ConnStatus.connected) ...[
+        if (vm.status == VMConnectionStatus.connected) ...[
           IconButton(
             icon: const Icon(Icons.link_off_rounded),
             tooltip: 'Disconnect',
-            onPressed: _disconnect,
+            onPressed: vm.disconnect,
           ),
         ],
         const SizedBox(width: 4),
@@ -351,35 +156,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // ── Body router ───────────────────────────────────────────────────────────
 
   Widget _buildBody() {
-    return switch (_status) {
-      _ConnStatus.idle => _IdleView(
+    final vm = VMConnectionManager.instance;
+    return switch (vm.status) {
+      VMConnectionStatus.idle => _IdleView(
           key: const ValueKey('idle'),
           onScanAgain: widget.onScanAgain,
         ),
-      _ConnStatus.connecting => _ConnectingView(
+      VMConnectionStatus.connecting => _ConnectingView(
           key: const ValueKey('connecting'),
           url: widget.vmServiceUrl ?? '',
         ),
-      _ConnStatus.connected => _ConnectedView(
+      VMConnectionStatus.connected => _ConnectedView(
           key: const ValueKey('connected'),
-          deviceName: _deviceName ?? 'Flutter Device',
-          dartVersion: _dartVersion,
-          isolateId: _isolateId,
-          uptime: _uptime,
-          reloadState: _reloadState,
-          lastReloadDuration: _lastReloadDuration,
+          deviceName: vm.deviceName ?? 'Flutter Device',
+          dartVersion: vm.dartVersion,
+          isolateId: vm.isolateId,
+          uptime: vm.uptime,
+          reloadState: vm.reloadState,
+          lastReloadDuration: vm.lastReloadDuration,
           shimmerCtrl: _shimmerCtrl,
           glowCtrl: _glowCtrl,
-          onHotReload: _hotReload,
-          onHotRestart: _hotRestart,
-          onDisconnect: _disconnect,
+          onHotReload: vm.hotReload,
+          onHotRestart: vm.hotRestart,
+          onDisconnect: vm.disconnect,
         ),
-      _ConnStatus.error => _ErrorView(
+      VMConnectionStatus.error => _ErrorView(
           key: const ValueKey('error'),
-          message: _errorMsg ?? 'Unknown error',
+          message: vm.errorMsg ?? 'Unknown error',
           url: widget.vmServiceUrl,
           onRetry: widget.vmServiceUrl != null
-              ? () => _connect(widget.vmServiceUrl!)
+              ? () => vm.connect(widget.vmServiceUrl!)
               : null,
           onScanAgain: widget.onScanAgain,
         ),
