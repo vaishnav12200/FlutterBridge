@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../theme/app_theme.dart';
 import '../services/vm_connection_manager.dart';
@@ -179,6 +182,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onHotReload: vm.hotReload,
           onHotRestart: vm.hotRestart,
           onDisconnect: vm.disconnect,
+          previewUrl: vm.previewUrl,
         ),
       VMConnectionStatus.error => _ErrorView(
           key: const ValueKey('error'),
@@ -515,6 +519,7 @@ class _ConnectedView extends StatelessWidget {
   final VoidCallback onHotReload;
   final VoidCallback onHotRestart;
   final VoidCallback onDisconnect;
+  final String? previewUrl;
 
   const _ConnectedView({
     super.key,
@@ -529,6 +534,7 @@ class _ConnectedView extends StatelessWidget {
     required this.onHotReload,
     required this.onHotRestart,
     required this.onDisconnect,
+    this.previewUrl,
   });
 
   String _formatUptime(Duration d) {
@@ -555,7 +561,7 @@ class _ConnectedView extends StatelessWidget {
           const SizedBox(height: 16),
 
           // ── 2. Live preview ─────────────────────────────────────────────
-          _LivePreviewCard(shimmerCtrl: shimmerCtrl),
+          _LivePreviewCard(shimmerCtrl: shimmerCtrl, previewUrl: previewUrl),
           const SizedBox(height: 16),
 
           // ── 3. Hot Reload + Hot Restart ─────────────────────────────────
@@ -825,12 +831,116 @@ class _InfoRow extends StatelessWidget {
 // Live Preview Card
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LivePreviewCard extends StatelessWidget {
+class _LivePreviewCard extends StatefulWidget {
   final AnimationController shimmerCtrl;
-  const _LivePreviewCard({required this.shimmerCtrl});
+  final String? previewUrl;
+  
+  const _LivePreviewCard({required this.shimmerCtrl, this.previewUrl});
+
+  @override
+  State<_LivePreviewCard> createState() => _LivePreviewCardState();
+}
+
+class _LivePreviewCardState extends State<_LivePreviewCard> {
+  WebSocketChannel? _channel;
+  StreamSubscription? _sub;
+  Uint8List? _currentFrame;
+
+  @override
+  void initState() {
+    super.initState();
+    _connect();
+  }
+
+  @override
+  void didUpdateWidget(_LivePreviewCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.previewUrl != oldWidget.previewUrl) {
+      _cleanup();
+      _connect();
+    }
+  }
+
+  @override
+  void dispose() {
+    _cleanup();
+    super.dispose();
+  }
+
+  void _connect() {
+    final previewUrl = widget.previewUrl;
+    if (previewUrl == null) return;
+
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(previewUrl));
+      _sub = _channel!.stream.listen((data) {
+        if (data is Uint8List) {
+          if (mounted) setState(() => _currentFrame = data);
+        } else if (data is List<int>) {
+          if (mounted) setState(() => _currentFrame = Uint8List.fromList(data));
+        }
+      });
+    } catch (_) {}
+  }
+
+  void _cleanup() {
+    _sub?.cancel();
+    _channel?.sink.close();
+  }
 
   @override
   Widget build(BuildContext context) {
+    Widget screenContent;
+    if (_currentFrame != null) {
+      screenContent = Image.memory(
+        _currentFrame!,
+        gaplessPlayback: true,
+        fit: BoxFit.contain,
+      );
+    } else {
+      screenContent = AnimatedBuilder(
+        animation: widget.shimmerCtrl,
+        builder: (ctx, _) {
+          final pos = -1.0 + 3.0 * widget.shimmerCtrl.value;
+          return Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment(pos - 1, -0.3),
+                end: Alignment(pos, 0.3),
+                colors: const [
+                  Color(0xFF1A1D2E),
+                  Color(0xFF242736),
+                  Color(0xFF2D3148),
+                  Color(0xFF242736),
+                  Color(0xFF1A1D2E),
+                ],
+                stops: const [0.0, 0.2, 0.5, 0.8, 1.0],
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.phone_android_rounded,
+                  size: 36,
+                  color: AppColors.textMuted.withValues(alpha: 0.3),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Waiting for frames...',
+                  style: GoogleFonts.inter(
+                    color: AppColors.textMuted.withValues(alpha: 0.5),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -857,19 +967,18 @@ class _LivePreviewCard extends StatelessWidget {
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: AppColors.warningDim,
+                  color: AppColors.successDim,
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                    color: AppColors.warning.withValues(alpha: 0.5),
+                    color: AppColors.success.withValues(alpha: 0.5),
                   ),
                 ),
                 child: Text(
-                  'Phase 4',
+                  'Phase 2',
                   style: GoogleFonts.inter(
-                    color: AppColors.warning,
+                    color: AppColors.success,
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                   ),
@@ -879,7 +988,7 @@ class _LivePreviewCard extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Phone frame + shimmer
+          // Phone frame
           Center(
             child: SizedBox(
               width: 160,
@@ -911,64 +1020,13 @@ class _LivePreviewCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
 
-                    // Screen area with shimmer
+                    // Screen area
                     Expanded(
                       child: Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: AnimatedBuilder(
-                            animation: shimmerCtrl,
-                            builder: (ctx, _) {
-                              final pos =
-                                  -1.0 + 3.0 * shimmerCtrl.value;
-                              return Container(
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment(pos - 1, -0.3),
-                                    end: Alignment(pos, 0.3),
-                                    colors: const [
-                                      Color(0xFF1A1D2E),
-                                      Color(0xFF242736),
-                                      Color(0xFF2D3148),
-                                      Color(0xFF242736),
-                                      Color(0xFF1A1D2E),
-                                    ],
-                                    stops: const [
-                                      0.0,
-                                      0.2,
-                                      0.5,
-                                      0.8,
-                                      1.0
-                                    ],
-                                  ),
-                                ),
-                                child: Column(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.phone_android_rounded,
-                                      size: 36,
-                                      color: AppColors.textMuted
-                                          .withValues(alpha: 0.3),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Text(
-                                      'Live Preview',
-                                      style: GoogleFonts.inter(
-                                        color: AppColors.textMuted
-                                            .withValues(alpha: 0.5),
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                          child: screenContent,
                         ),
                       ),
                     ),
@@ -993,7 +1051,7 @@ class _LivePreviewCard extends StatelessWidget {
 
           // Caption
           Text(
-            'Screen streaming via ADB will be available in Phase 4',
+            'Streaming live screenshot frames from CLI via WebSocket',
             style: GoogleFonts.inter(
               color: AppColors.textMuted,
               fontSize: 12,
