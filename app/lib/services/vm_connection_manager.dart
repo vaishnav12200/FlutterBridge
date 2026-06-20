@@ -47,6 +47,9 @@ class VMConnectionManager extends ChangeNotifier {
   String? _currentUrl;
   String? get currentUrl => _currentUrl;
 
+  String? _previewUrl;
+  String? get previewUrl => _previewUrl;
+
   // Uptime
   Timer? _uptimeTimer;
   Duration _uptime = Duration.zero;
@@ -70,6 +73,18 @@ class VMConnectionManager extends ChangeNotifier {
   void connect(String url) {
     cleanup();
     _currentUrl = url;
+    
+    try {
+      final uri = Uri.parse(url);
+      final pPort = uri.queryParameters['previewPort'];
+      if (pPort != null) {
+        _previewUrl = 'ws://${uri.host}:$pPort';
+      } else {
+        _previewUrl = null;
+      }
+    } catch (_) {
+      _previewUrl = null;
+    }
     _status = VMConnectionStatus.connecting;
     _errorMsg = null;
     _deviceName = null;
@@ -123,6 +138,7 @@ class VMConnectionManager extends ChangeNotifier {
     cleanup();
     _status = VMConnectionStatus.idle;
     _currentUrl = null;
+    _previewUrl = null;
     notifyListeners();
   }
 

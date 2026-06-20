@@ -2,6 +2,7 @@
 
 const qrcode = require('qrcode-terminal');
 const chalk = require('chalk');
+const WebSocket = require('ws');
 const { spawn } = require('child_process');
 const readline = require('readline');
 const fs = require('fs');
@@ -199,6 +200,61 @@ function closeAllProxies() {
 }
 
 process.on('exit', closeAllProxies);
+
+function startScreenshotServer(deviceId) {
+  return new Promise((resolve, reject) => {
+    try {
+      const wss = new WebSocket.Server({ port: 0, host: '0.0.0.0' });
+      let intervalId = null;
+      let connections = 0;
+
+      wss.on('listening', () => {
+        const port = wss.address().port;
+        resolve(port);
+      });
+
+      wss.on('error', (err) => {
+        reject(err);
+      });
+
+      wss.on('connection', (ws) => {
+        connections++;
+        
+        if (connections === 1) {
+          intervalId = setInterval(() => {
+            const adbArgs = deviceId ? ['-s', deviceId, 'exec-out', 'screencap', '-p'] : ['exec-out', 'screencap', '-p'];
+            const child = spawn('adb', adbArgs);
+            const chunks = [];
+            
+            child.stdout.on('data', chunk => chunks.push(chunk));
+            child.on('close', code => {
+              if (code === 0 && wss.clients.size > 0) {
+                const buffer = Buffer.concat(chunks);
+                wss.clients.forEach(client => {
+                  if (client.readyState === WebSocket.OPEN) {
+                    client.send(buffer);
+                  }
+                });
+              }
+            });
+          }, 500); // 2 fps polling
+        }
+
+        ws.on('close', () => {
+          connections--;
+          if (connections === 0 && intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
+        });
+      });
+
+      registerProxy(wss);
+    } catch(err) {
+      reject(err);
+    }
+  });
+}
 
 function startTcpProxy(targetHost, targetPort) {
   return new Promise((resolve, reject) => {
@@ -457,6 +513,14 @@ async function main() {
     return;
   }
 
+  let previewPort = null;
+  try {
+    previewPort = await startScreenshotServer(deviceId);
+    if (!quiet) console.log(chalk.gray(`Started Live Preview server on port ${previewPort}`));
+  } catch (e) {
+    if (!quiet) console.warn(chalk.yellow(`Warning: Failed to start Live Preview server: ${e.message}`));
+  }
+
   if (!quiet) {
     console.log(chalk.gray('Starting Flutter...\n'));
   }
@@ -509,7 +573,17 @@ async function main() {
             if (vmServiceUrl) {
               return;
             }
-            vmServiceUrl = result.url;
+            
+            let finalUrl = result.url;
+            if (previewPort) {
+              try {
+                const u = new URL(finalUrl);
+                u.searchParams.set('previewPort', previewPort);
+                finalUrl = u.toString();
+              } catch(e) {}
+            }
+            
+            vmServiceUrl = finalUrl;
             clearTimeout(vmTimeout);
 
             if (jsonOutput) {
