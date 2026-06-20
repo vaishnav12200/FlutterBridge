@@ -134,7 +134,7 @@ class _LogsScreenState extends State<LogsScreen> {
             ),
             Switch(
               value: _autoScroll,
-              activeColor: AppColors.accent,
+              activeTrackColor: AppColors.accent,
               onChanged: (val) {
                 setState(() => _autoScroll = val);
                 if (val) _onVMManagerChange(); // Trigger scroll
@@ -253,7 +253,7 @@ class _LogsScreenState extends State<LogsScreen> {
           controller: _scrollController,
           padding: const EdgeInsets.only(bottom: 32),
           itemCount: filteredLogs.length,
-          separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+          separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.border),
           itemBuilder: (context, index) {
             final log = filteredLogs[index];
             return _buildLogEntry(log);

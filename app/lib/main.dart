@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'theme/app_theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/scanner_screen.dart';
+import 'screens/logs_screen.dart';
 import 'screens/placeholder_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,11 +78,7 @@ class _MainShellState extends State<MainShell> {
         vmServiceUrl: _vmServiceUrl,
         onScanAgain: _onScanAgain,
       ),
-      const PlaceholderScreen(
-        title: 'Logs',
-        icon: Icons.terminal_rounded,
-        comingSoon: 'Screen 3 — Live log stream',
-      ),
+      const LogsScreen(),
       const PlaceholderScreen(
         title: 'Devices',
         icon: Icons.phone_android_rounded,
