@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'theme/app_theme.dart';
+import 'screens/home_screen.dart';
 import 'screens/scanner_screen.dart';
 import 'screens/placeholder_screen.dart';
 
@@ -52,42 +53,51 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  String? _vmServiceUrl;
 
   void _onUrlDetected(String url) {
-    // When QR is scanned, could navigate to Home tab (index 1) in the future
+    setState(() {
+      _vmServiceUrl = url;
+      _index = 1; // switch to Home tab
+    });
     debugPrint('URL detected: $url');
   }
 
-  late final List<Widget> _screens = [
-    ScannerScreen(onUrlDetected: _onUrlDetected),
-    const PlaceholderScreen(
-      title: 'Home',
-      icon: Icons.developer_board_rounded,
-      comingSoon: 'Screen 2 — Hot reload & live preview',
-    ),
-    const PlaceholderScreen(
-      title: 'Logs',
-      icon: Icons.terminal_rounded,
-      comingSoon: 'Screen 3 — Live log stream',
-    ),
-    const PlaceholderScreen(
-      title: 'Devices',
-      icon: Icons.phone_android_rounded,
-      comingSoon: 'Screen 4 — Device manager',
-    ),
-    const PlaceholderScreen(
-      title: 'Settings',
-      icon: Icons.tune_rounded,
-      comingSoon: 'Screen 5 — App preferences',
-    ),
-  ];
+  void _onScanAgain() {
+    setState(() {
+      _index = 0; // Switch to Scanner tab
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final List<Widget> screens = [
+      ScannerScreen(onUrlDetected: _onUrlDetected),
+      HomeScreen(
+        vmServiceUrl: _vmServiceUrl,
+        onScanAgain: _onScanAgain,
+      ),
+      const PlaceholderScreen(
+        title: 'Logs',
+        icon: Icons.terminal_rounded,
+        comingSoon: 'Screen 3 — Live log stream',
+      ),
+      const PlaceholderScreen(
+        title: 'Devices',
+        icon: Icons.phone_android_rounded,
+        comingSoon: 'Screen 4 — Device manager',
+      ),
+      const PlaceholderScreen(
+        title: 'Settings',
+        icon: Icons.tune_rounded,
+        comingSoon: 'Screen 5 — App preferences',
+      ),
+    ];
+
     return Scaffold(
       backgroundColor: AppColors.background,
       // Preserve state of each screen (camera, scroll position, etc.)
-      body: IndexedStack(index: _index, children: _screens),
+      body: IndexedStack(index: _index, children: screens),
       bottomNavigationBar: _buildNav(),
     );
   }
