@@ -144,7 +144,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ],
       ),
       actions: [
-        if (vm.status == VMConnectionStatus.connected) ...[
+        if (vm.status == VMConnectionStatus.connected ||
+            vm.status == VMConnectionStatus.reconnecting) ...[
           IconButton(
             icon: const Icon(Icons.link_off_rounded),
             tooltip: 'Disconnect',
@@ -169,6 +170,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           key: const ValueKey('connecting'),
           url: widget.vmServiceUrl ?? '',
         ),
+      VMConnectionStatus.reconnecting => _ReconnectingView(
+          key: const ValueKey('reconnecting'),
+        ),
       VMConnectionStatus.connected => _ConnectedView(
           key: const ValueKey('connected'),
           deviceName: vm.deviceName ?? 'Flutter Device',
@@ -183,6 +187,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onHotRestart: vm.hotRestart,
           onDisconnect: vm.disconnect,
           previewUrl: vm.previewUrl,
+        ),
+      VMConnectionStatus.stopped => _StoppedView(
+          key: const ValueKey('stopped'),
+          onScanAgain: widget.onScanAgain,
         ),
       VMConnectionStatus.error => _ErrorView(
           key: const ValueKey('error'),
@@ -1465,6 +1473,234 @@ class _ErrorView extends StatelessWidget {
           ],
 
           // Scan again
+          if (onScanAgain != null)
+            OutlinedButton.icon(
+              onPressed: onScanAgain,
+              icon: const Icon(Icons.qr_code_scanner_rounded, size: 16),
+              label: const Text('Scan New QR Code'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// View: Reconnecting (hot restart detected, silently reconnecting)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ReconnectingView extends StatefulWidget {
+  const _ReconnectingView({super.key});
+
+  @override
+  State<_ReconnectingView> createState() => _ReconnectingViewState();
+}
+
+class _ReconnectingViewState extends State<_ReconnectingView>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _rotCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _rotCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _rotCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Accent-tinted spinner
+            AnimatedBuilder(
+              animation: _rotCtrl,
+              builder: (ctx, child) => Transform.rotate(
+                angle: _rotCtrl.value * 2 * math.pi,
+                child: child,
+              ),
+              child: SizedBox(
+                width: 72,
+                height: 72,
+                child: CustomPaint(painter: _SpinnerPainter()),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Transform.translate(
+              offset: const Offset(0, -50),
+              child: const Icon(
+                Icons.refresh_rounded,
+                color: AppColors.accent,
+                size: 24,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Reconnecting...',
+              style: GoogleFonts.inter(
+                color: AppColors.textPrimary,
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Hot restart detected — re-establishing connection',
+              style: GoogleFonts.inter(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            // Subtle info pill
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppColors.accentGlow,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.accentDim),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.auto_awesome_rounded,
+                      size: 13, color: AppColors.accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    'No re-scan needed',
+                    style: GoogleFonts.inter(
+                      color: AppColors.accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// View: Stopped (flutter run process exited cleanly)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StoppedView extends StatelessWidget {
+  final VoidCallback? onScanAgain;
+  const _StoppedView({super.key, this.onScanAgain});
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        children: [
+          const SizedBox(height: 40),
+
+          // Amber-tinted icon — calm, not alarming
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(
+              color: AppColors.warningDim,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.stop_circle_rounded,
+              color: AppColors.warning,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          Text(
+            'Flutter Stopped',
+            style: GoogleFonts.inter(
+              color: AppColors.textPrimary,
+              fontSize: 22,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          Text(
+            'The Flutter run session on your PC has ended.',
+            style: GoogleFonts.inter(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+              height: 1.6,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 28),
+
+          // Info card
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'To reconnect',
+                  style: GoogleFonts.inter(
+                    color: AppColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                for (final step in [
+                  'Run  bridge  again in your Flutter project',
+                  'A new QR code will appear in the terminal',
+                  'Scan it to reconnect',
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.arrow_right_rounded,
+                            size: 16, color: AppColors.warning),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            step,
+                            style: GoogleFonts.inter(
+                              color: AppColors.textSecondary,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
           if (onScanAgain != null)
             OutlinedButton.icon(
               onPressed: onScanAgain,
