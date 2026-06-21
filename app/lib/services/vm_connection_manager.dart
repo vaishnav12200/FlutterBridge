@@ -3,7 +3,14 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-enum VMConnectionStatus { idle, connecting, connected, error }
+enum VMConnectionStatus {
+  idle,
+  connecting,
+  reconnecting, // Hot restart detected, silently reconnecting
+  connected,
+  stopped,      // Flutter process was stopped cleanly (not an error)
+  error,
+}
 enum VMReloadState { idle, loading, success, error }
 enum LogLevel { debug, info, warning, error }
 
@@ -11,11 +18,13 @@ class LogEntry {
   final DateTime timestamp;
   final String message;
   final LogLevel level;
+  final bool isSeparator; // True for '--- Hot Restarted ---' dividers
 
   LogEntry({
     required this.timestamp,
     required this.message,
     required this.level,
+    this.isSeparator = false,
   });
 }
 
@@ -23,11 +32,16 @@ class VMConnectionManager extends ChangeNotifier {
   static final VMConnectionManager instance = VMConnectionManager._();
   VMConnectionManager._();
 
-  // WebSocket / Connection State
+  // ── VM service WebSocket ──────────────────────────────────────────────────
   WebSocketChannel? _channel;
   StreamSubscription<dynamic>? _sub;
   Timer? _connTimeout;
   int _nextId = 1;
+
+  // ── Control channel WebSocket (push events from CLI) ──────────────────────
+  WebSocketChannel? _controlChannel;
+  StreamSubscription<dynamic>? _controlSub;
+  String? _controlUrl;
 
   VMConnectionStatus _status = VMConnectionStatus.idle;
   VMConnectionStatus get status => _status;
@@ -69,11 +83,14 @@ class VMConnectionManager extends ChangeNotifier {
   final List<LogEntry> _logs = [];
   List<LogEntry> get logs => List.unmodifiable(_logs);
 
-  // Connection management
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  /// Full connect — called when the user scans a QR code.
+  /// Parses previewPort and controlPort from query params.
   void connect(String url) {
-    cleanup();
+    _cleanupVmChannel();
     _currentUrl = url;
-    
+
     try {
       final uri = Uri.parse(url);
       final pPort = uri.queryParameters['previewPort'];
@@ -82,9 +99,19 @@ class VMConnectionManager extends ChangeNotifier {
       } else {
         _previewUrl = null;
       }
+
+      // Connect to the CLI control channel if a controlPort is present
+      final cPort = uri.queryParameters['controlPort'];
+      if (cPort != null) {
+        final controlUri = 'ws://${uri.host}:$cPort';
+        if (controlUri != _controlUrl) {
+          _connectControl(controlUri);
+        }
+      }
     } catch (_) {
       _previewUrl = null;
     }
+
     _status = VMConnectionStatus.connecting;
     _errorMsg = null;
     _deviceName = null;
@@ -96,6 +123,23 @@ class VMConnectionManager extends ChangeNotifier {
     _logs.clear();
     notifyListeners();
 
+    _openVmChannel(url);
+  }
+
+  /// Disconnect completely — clears all state including control channel.
+  void disconnect() {
+    _cleanupVmChannel();
+    _cleanupControlChannel();
+    _status = VMConnectionStatus.idle;
+    _currentUrl = null;
+    _previewUrl = null;
+    _controlUrl = null;
+    notifyListeners();
+  }
+
+  // ── VM channel management ──────────────────────────────────────────────────
+
+  void _openVmChannel(String url) {
     try {
       _channel = WebSocketChannel.connect(Uri.parse(url));
     } catch (e) {
@@ -104,7 +148,8 @@ class VMConnectionManager extends ChangeNotifier {
     }
 
     _connTimeout = Timer(const Duration(seconds: 12), () {
-      if (_status == VMConnectionStatus.connecting) {
+      if (_status == VMConnectionStatus.connecting ||
+          _status == VMConnectionStatus.reconnecting) {
         _setError(
           'Connection timed out.\n\nMake sure your PC and phone are on the same WiFi network.',
         );
@@ -115,6 +160,9 @@ class VMConnectionManager extends ChangeNotifier {
       _onMessage,
       onError: (e) => _setError('Connection error: $e'),
       onDone: () {
+        // Only show an error if we haven't already received a flutter_stopped
+        // notification from the control channel, and we're not in the middle
+        // of a silent reconnect triggered by vm_url_changed.
         if (_status == VMConnectionStatus.connected) {
           _setError('Connection closed by the remote end.');
         }
@@ -124,7 +172,40 @@ class VMConnectionManager extends ChangeNotifier {
     _send('getVM');
   }
 
-  void cleanup() {
+  /// Silently reconnects to a new VM service URL after hot restart.
+  /// Preserves logs and adds a visible separator, does NOT clear state.
+  void _silentReconnect(String newUrl) {
+    // Close old VM channel only — keep control channel, logs, and session alive
+    _cleanupVmChannel();
+
+    _currentUrl = newUrl;
+
+    // Update preview URL from new URL params
+    try {
+      final uri = Uri.parse(newUrl);
+      final pPort = uri.queryParameters['previewPort'];
+      if (pPort != null) {
+        _previewUrl = 'ws://${uri.host}:$pPort';
+      }
+    } catch (_) {}
+
+    _status = VMConnectionStatus.reconnecting;
+    _reloadState = VMReloadState.idle;
+
+    // Add a visible separator in the log panel
+    _logs.add(LogEntry(
+      timestamp: DateTime.now(),
+      message: '─── Hot Restarted ───',
+      level: LogLevel.info,
+      isSeparator: true,
+    ));
+
+    notifyListeners();
+
+    _openVmChannel(newUrl);
+  }
+
+  void _cleanupVmChannel() {
     _connTimeout?.cancel();
     _sub?.cancel();
     _sub = null;
@@ -134,13 +215,72 @@ class VMConnectionManager extends ChangeNotifier {
     _reloadResetTimer?.cancel();
   }
 
-  void disconnect() {
-    cleanup();
-    _status = VMConnectionStatus.idle;
-    _currentUrl = null;
-    _previewUrl = null;
-    notifyListeners();
+  // ── Control channel management ─────────────────────────────────────────────
+
+  void _connectControl(String controlWsUrl) {
+    _cleanupControlChannel();
+    _controlUrl = controlWsUrl;
+
+    try {
+      _controlChannel = WebSocketChannel.connect(Uri.parse(controlWsUrl));
+    } catch (_) {
+      return; // Control channel is best-effort, don't crash the session
+    }
+
+    _controlSub = _controlChannel!.stream.listen(
+      _onControlMessage,
+      onError: (_) {}, // Silently ignore control channel errors
+      onDone: () {
+        // Control channel closed — if Flutter is still running this is unexpected,
+        // but we don't want to surface it as an error.
+        _controlUrl = null;
+      },
+    );
   }
+
+  void _cleanupControlChannel() {
+    _controlSub?.cancel();
+    _controlSub = null;
+    _controlChannel?.sink.close();
+    _controlChannel = null;
+  }
+
+  void _onControlMessage(dynamic raw) {
+    if (raw is! String) return;
+    Map<String, dynamic> msg;
+    try {
+      msg = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return;
+    }
+
+    final type = msg['type'] as String?;
+
+    switch (type) {
+      case 'vm_url_changed':
+        // Hot restart: Flutter emitted a new VM service URL.
+        // Silently reconnect without requiring a re-scan.
+        final newUrl = msg['url'] as String?;
+        if (newUrl != null && newUrl.isNotEmpty) {
+          _silentReconnect(newUrl);
+        }
+        break;
+
+      case 'flutter_stopped':
+        // The flutter run process on the PC has exited cleanly.
+        // Show a calm "stopped" state, not a scary error.
+        _cleanupVmChannel();
+        _status = VMConnectionStatus.stopped;
+        _errorMsg = null;
+        notifyListeners();
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  // ── Messaging (VM service JSON-RPC) ───────────────────────────────────────
 
   void _setError(String msg) {
     _connTimeout?.cancel();
@@ -150,7 +290,6 @@ class VMConnectionManager extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Messaging
   void _send(String method, {Map<String, dynamic>? params}) {
     if (_channel == null) return;
     _channel!.sink.add(jsonEncode({
@@ -183,17 +322,17 @@ class VMConnectionManager extends ChangeNotifier {
     final result = msg['result'];
 
     if (result is Map<String, dynamic>) {
-      // getVM handshake response
+      // getVM handshake response — connection established
       if (result.containsKey('isolates')) {
         _connTimeout?.cancel();
         final isolates =
             (result['isolates'] as List?)?.cast<Map<String, dynamic>>();
-        
+
         _status = VMConnectionStatus.connected;
         _deviceName = result['name']?.toString() ?? 'Flutter Device';
         _dartVersion = result['version']?.toString();
         _isolateId = isolates?.firstOrNull?['id']?.toString();
-        
+
         _startUptime();
         _subscribeToStreams();
         notifyListeners();
@@ -229,7 +368,6 @@ class VMConnectionManager extends ChangeNotifier {
       if (bytesBase64 != null) {
         try {
           final message = utf8.decode(base64.decode(bytesBase64));
-          // Avoid empty logging
           if (message.trim().isNotEmpty) {
             _addLog(
               message,
@@ -245,7 +383,7 @@ class VMConnectionManager extends ChangeNotifier {
         final messageRef = logRecord['message'] as Map<String, dynamic>?;
         final message = messageRef?['valueAsString']?.toString() ?? '';
         final level = logRecord['level'] as int? ?? 0;
-        
+
         LogLevel logLevel = LogLevel.info;
         if (level >= 1000) {
           logLevel = LogLevel.error;
@@ -280,7 +418,7 @@ class VMConnectionManager extends ChangeNotifier {
         ? DateTime.now().difference(_reloadStart!)
         : null;
     _reloadStart = null;
-    
+
     _reloadState = success ? VMReloadState.success : VMReloadState.error;
     _lastReloadDuration = elapsed;
     notifyListeners();
@@ -300,7 +438,8 @@ class VMConnectionManager extends ChangeNotifier {
     });
   }
 
-  // Reload / Restart Actions
+  // ── Reload / Restart Actions ───────────────────────────────────────────────
+
   void hotReload() {
     if (_status != VMConnectionStatus.connected) return;
     if (_reloadState == VMReloadState.loading) return;
@@ -328,7 +467,8 @@ class VMConnectionManager extends ChangeNotifier {
 
   @override
   void dispose() {
-    cleanup();
+    _cleanupVmChannel();
+    _cleanupControlChannel();
     super.dispose();
   }
 }
