@@ -226,9 +226,12 @@ class _LogsScreenState extends State<LogsScreen> {
       listenable: VMConnectionManager.instance,
       builder: (context, _) {
         final allLogs = VMConnectionManager.instance.logs;
+        // Separators always pass through; level filter applies only to regular entries
         final filteredLogs = _filter == null
             ? allLogs
-            : allLogs.where((log) => log.level == _filter).toList();
+            : allLogs
+                .where((log) => log.isSeparator || log.level == _filter)
+                .toList();
 
         if (allLogs.isEmpty) {
           return Center(
@@ -253,7 +256,14 @@ class _LogsScreenState extends State<LogsScreen> {
           controller: _scrollController,
           padding: const EdgeInsets.only(bottom: 32),
           itemCount: filteredLogs.length,
-          separatorBuilder: (context, index) => const Divider(height: 1, color: AppColors.border),
+          separatorBuilder: (context, index) {
+            // No divider line before/after a separator widget — it has its own spacing
+            if (filteredLogs[index].isSeparator ||
+                (index + 1 < filteredLogs.length && filteredLogs[index + 1].isSeparator)) {
+              return const SizedBox.shrink();
+            }
+            return const Divider(height: 1, color: AppColors.border);
+          },
           itemBuilder: (context, index) {
             final log = filteredLogs[index];
             return _buildLogEntry(log);
@@ -264,9 +274,47 @@ class _LogsScreenState extends State<LogsScreen> {
   }
 
   Widget _buildLogEntry(LogEntry log) {
+    // ── Separator (Hot Restart divider) ──────────────────────────────────────
+    if (log.isSeparator) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            const Expanded(child: Divider(color: AppColors.accentDim, thickness: 1)),
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.accentGlow,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.accentDim),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.refresh_rounded, size: 11, color: AppColors.accent),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Hot Restarted',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.accent,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(child: Divider(color: AppColors.accentDim, thickness: 1)),
+          ],
+        ),
+      );
+    }
+
+    // ── Regular log entry ────────────────────────────────────────────────────
     final color = _colorForLevel(log.level);
-    
-    // Format timestamp: HH:mm:ss.SSS
+
     final hour = log.timestamp.hour.toString().padLeft(2, '0');
     final minute = log.timestamp.minute.toString().padLeft(2, '0');
     final second = log.timestamp.second.toString().padLeft(2, '0');
