@@ -6,6 +6,7 @@
 ![Node](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)
 ![Flutter](https://img.shields.io/badge/flutter-%3E%3D3.0.0-blue)
 ![Phase 1](https://img.shields.io/badge/Phase%201-Complete-success)
+![Phase 2](https://img.shields.io/badge/Phase%202-Complete-success)
 ![Status](https://img.shields.io/badge/status-in%20development-orange)
 
 ---
@@ -34,8 +35,9 @@ It enables:
 | CLI flags (--device, --qr-only, --json) | ✅ Done |
 | LAN IP rewriting | ✅ Done |
 | NPM package published (npm/pnpm/bun) | ✅ Done |
-| Hot reload over WiFi | 📅 Planned (Phase 2) |
-| Companion Android app | 📅 Planned (Phase 2) |
+| Hot reload over WiFi | ✅ Done |
+| Companion Android app | ✅ Done |
+| Live App Preview (MJPEG screenshot streaming) | ✅ Done |
 | iOS support | 📅 Planned (Phase 5) |
 | Plugin support | 📅 Planned (Phase 5) |
 
@@ -51,7 +53,7 @@ flutterbridge/
 ├── cli/          # Node.js CLI tool
 │   └── index.js  # Entry point
 │
-├── app/          # Flutter companion app (coming soon)
+├── app/          # Flutter companion app
 │
 ├── docs/         # Documentation
 │

@@ -37,7 +37,7 @@ bunx @vaishnavkm/flutterbridge
 Navigate to your Flutter project directory and run:
 
 ```bash
-flutterbridge
+bridge
 ```
 
 A QR code will appear in your terminal. Scan it with the FlutterBridge companion app to connect.
@@ -49,18 +49,18 @@ and encode that address in the QR so phones can connect over WiFi.
 
 ```bash
 # Choose a specific device
-flutterbridge --device <device-id>
-flutterbridge -d <device-id>
+bridge --device <device-id>
+bridge -d <device-id>
 
 # Print only the QR code (no extra logs)
-flutterbridge --qr-only
+bridge --qr-only
 
 # Print machine-readable JSON output
-flutterbridge --json
+bridge --json
 
 # Pass additional Flutter flags
-flutterbridge -- --release
-flutterbridge -- --flavor production
+bridge -- --release
+bridge -- --flavor production
 ```
 
 ## Requirements
