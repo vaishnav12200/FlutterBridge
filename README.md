@@ -91,20 +91,20 @@ flutterbridge/
 #### Option 1: Package Manager (Recommended)
 
 ```bash
+# Using pnpm (Recommended)
+pnpm add -g @vaishnavkm/flutterbridge
+
 # Using npm
 npm install -g @vaishnavkm/flutterbridge
-
-# Using pnpm
-pnpm add -g @vaishnavkm/flutterbridge
 
 # Using bun
 bun add -g @vaishnavkm/flutterbridge
 
-# Or use without installation (npm)
-npx @vaishnavkm/flutterbridge
-
 # Or use without installation (pnpm)
 pnpm dlx @vaishnavkm/flutterbridge
+
+# Or use without installation (npm)
+npx @vaishnavkm/flutterbridge
 
 # Or use without installation (bun)
 bunx @vaishnavkm/flutterbridge
@@ -124,11 +124,11 @@ Navigate to your Flutter project and run:
 
 ```bash
 # If installed globally (works with npm, pnpm, or bun)
-flutterbridge
+bridge
 
 # Or without installation
-npx @vaishnavkm/flutterbridge      # npm
 pnpm dlx @vaishnavkm/flutterbridge # pnpm
+npx @vaishnavkm/flutterbridge      # npm
 bunx @vaishnavkm/flutterbridge     # bun
 
 # Or from source
@@ -144,18 +144,18 @@ and encode that address in the QR so phones can connect over WiFi.
 
 ```bash
 # Choose a specific device (recommended when multiple devices are connected)
-flutterbridge --device <device-id>
-flutterbridge -d <device-id>
+bridge --device <device-id>
+bridge -d <device-id>
 
 # Print only the QR code (no extra logs)
-flutterbridge --qr-only
+bridge --qr-only
 
 # Print machine-readable output (JSON) when the VM URL is ready
-flutterbridge --json
+bridge --json
 
 # Pass additional Flutter flags
-flutterbridge -- --release
-flutterbridge -- --flavor production
+bridge -- --release
+bridge -- --flavor production
 ```
 
 ### Connect Your Device
@@ -189,13 +189,16 @@ All Phase 1 objectives have been achieved:
 
 **The CLI is production-ready and fully functional!**
 
-### 🚧 Phase 2: Companion App MVP — NEXT
+### ✅ Phase 2: Companion App MVP — COMPLETED
 
-- QR scanner UX, URL validation, manual input fallback
-- VM service WebSocket connection with reconnect + token validation
-- Hot reload + hot restart controls with status
-- Remote logs panel with filters and timestamps
-- Bottom navigation: Home / Logs / Devices / Settings
+All Phase 2 objectives have been achieved:
+
+- ✅ QR scanner UX, URL validation, manual input fallback
+- ✅ VM service WebSocket connection with reconnect + token validation
+- ✅ Hot reload + hot restart controls with status
+- ✅ Remote logs panel with filters and timestamps
+- ✅ Bottom navigation: Home / Logs / Devices / Settings
+- ✅ Live App Preview: Streams live screenshots from the device to the companion app over WebSocket!
 
 ---
 
@@ -217,46 +220,46 @@ All Phase 1 objectives have been achieved:
         - Package configured for npm publishing.
         - Published as `@vaishnavkm/flutterbridge` with `npx` and global install support.
 
-### Phase 2 — Companion App MVP 🚧 NEXT
+### Phase 2 — Companion App MVP ✅ COMPLETED
 
 The companion app is the heart of FlutterBridge. This phase delivers a working
 Android app that connects to the CLI over WiFi and gives developers a real-time
 window into their running Flutter app.
 
 #### 2.1 QR Scanner Screen
-- Camera permission handling with graceful fallback UI
-- Real-time QR scanning using `mobile_scanner` package
-- URL validation — reject malformed or non-FlutterBridge QR codes
-- Manual URL input fallback (paste the URL shown in terminal)
-- Visual feedback: scanning → connecting → connected states
+- ✅ Camera permission handling with graceful fallback UI
+- ✅ Real-time QR scanning using `mobile_scanner` package
+- ✅ URL validation — reject malformed or non-FlutterBridge QR codes
+- ✅ Manual URL input fallback (paste the URL shown in terminal)
+- ✅ Visual feedback: scanning → connecting → connected states
 
 #### 2.2 VM Service WebSocket Connection
-- Parse scanned URL and establish WebSocket to `vmServiceUri`
-- Connection state management: connecting / connected / disconnected / error
-- Auto-reconnect with exponential backoff if WiFi drops
-- Clear error messages with actionable hints (wrong network, firewall, etc.)
-- Token validation for secure pairing (matches token embedded in QR)
+- ✅ Parse scanned URL and establish WebSocket to `vmServiceUri`
+- ✅ Connection state management: connecting / connected / disconnected / error
+- ✅ Auto-reconnect with exponential backoff if WiFi drops
+- ✅ Clear error messages with actionable hints (wrong network, firewall, etc.)
+- ✅ Token validation for secure pairing (matches token embedded in QR)
 
 #### 2.3 Hot Reload from Phone
-- One-tap hot reload button in the companion app
-- Invokes `callServiceExtension('hotReload')` over VM service WebSocket
-- Shows reload status: triggered → rebuilding → done / error
-- Reload duration display (e.g. "Hot reload in 312ms")
-- Hot restart support as a secondary option
+- ✅ One-tap hot reload button in the companion app
+- ✅ Invokes `callServiceExtension('hotReload')` over VM service WebSocket
+- ✅ Shows reload status: triggered → rebuilding → done / error
+- ✅ Reload duration display (e.g. "Hot reload in 312ms")
+- ✅ Hot restart support as a secondary option
 
 #### 2.4 Remote Logs
-- Stream live logs via `streamListen('Logging')` over VM service
-- Filter tabs: All / Debug / Info / Warn / Error
-- Color-coded log levels matching Flutter's log severity
-- Timestamp display per log entry
-- Source file + line number shown below each log
-- Clear logs button and auto-scroll toggle
+- ✅ Stream live logs via `streamListen('Logging')` over VM service
+- ✅ Filter tabs: All / Debug / Info / Warn / Error
+- ✅ Color-coded log levels matching Flutter's log severity
+- ✅ Timestamp display per log entry
+- ✅ Source file + line number shown below each log
+- ✅ Clear logs button and auto-scroll toggle
 
 #### 2.5 Bottom Navigation
-- **Home** — connection status, device info, quick actions
-- **Logs** — live log stream with filters
-- **Devices** — list of connected/available devices
-- **Settings** — app preferences, connection history
+- ✅ **Home** — connection status, device info, quick actions
+- ✅ **Logs** — live log stream with filters
+- ✅ **Devices** — list of connected/available devices
+- ✅ **Settings** — app preferences, connection history
 
 ---
 
@@ -291,18 +294,17 @@ This is the flagship feature — making FlutterBridge feel truly like Expo. The
 companion app shows a **live video stream** of the running Flutter app, so the
 phone becomes a real-time preview window.
 
-#### 4.1 Screen Capture Pipeline
-- CLI pushes a lightweight capture server to the Android device via ADB (scrcpy protocol)
-- Capture server uses Android `MediaCodec` to encode screen as H.264 in real-time
-- No permission popup — uses internal Android display APIs (same approach as scrcpy)
-- Frames streamed from device → CLI over ADB socket tunnel
+#### 4.1 Screen Capture Pipeline ✅ (Basic Polling Implemented)
+- ✅ CLI runs `adb exec-out screencap -p` to grab device frames
+- 🚧 Fast Android `MediaCodec` pipeline (Planned for Full version)
+- ✅ Frames streamed from device → CLI over WebSocket
 
-#### 4.2 MJPEG Streaming (Phase 4 Alpha)
-- CLI receives frames and re-encodes as MJPEG
-- Companion app connects to MJPEG endpoint over HTTP on LAN
-- Renders live preview at ~10–15 fps — good enough for UI inspection
-- Low implementation complexity, ships fast as a proof of concept
-- Shown fullscreen in companion app with overlay controls
+#### 4.2 MJPEG Streaming (Phase 4 Alpha) ✅ COMPLETED
+- ✅ CLI receives frames and streams them as raw JPEG over WebSocket
+- ✅ Companion app connects to WebSocket endpoint on LAN
+- ✅ Renders live preview directly within the Home screen
+- ✅ Low implementation complexity, ships fast as a proof of concept
+- 🚧 Shown fullscreen in companion app with overlay controls (Next)
 
 #### 4.3 WebRTC Streaming (Phase 4 Full)
 - Replace MJPEG with WebRTC peer connection for true low-latency streaming
