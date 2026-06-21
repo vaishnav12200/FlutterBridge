@@ -201,6 +201,37 @@ function closeAllProxies() {
 
 process.on('exit', closeAllProxies);
 
+// ---------------------------------------------------------------------------
+// Control Server — lets CLI push events (new VM URL, flutter stopped) to apps
+// ---------------------------------------------------------------------------
+function startControlServer() {
+  return new Promise((resolve, reject) => {
+    const wss = new WebSocket.Server({ port: 0, host: '0.0.0.0' });
+
+    wss.on('listening', () => {
+      const port = wss.address().port;
+
+      // Broadcast helper — sends a JSON message to every connected app client
+      wss.broadcast = (msg) => {
+        const payload = JSON.stringify(msg);
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(payload);
+          }
+        });
+      };
+
+      registerProxy(wss);
+      resolve({ wss, port });
+    });
+
+    wss.on('error', reject);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Screenshot / Live Preview Server
+// ---------------------------------------------------------------------------
 function startScreenshotServer(deviceId) {
   return new Promise((resolve, reject) => {
     try {
@@ -513,6 +544,17 @@ async function main() {
     return;
   }
 
+  // Start control server for push notifications (hot restart URL, flutter stopped)
+  let controlServer = null;
+  let controlPort = null;
+  try {
+    controlServer = await startControlServer();
+    controlPort = controlServer.port;
+    if (!quiet) console.log(chalk.gray(`Control server on port ${controlPort}`));
+  } catch (e) {
+    if (!quiet) console.warn(chalk.yellow(`Warning: Failed to start control server: ${e.message}`));
+  }
+
   let previewPort = null;
   try {
     previewPort = await startScreenshotServer(deviceId);
@@ -539,7 +581,7 @@ async function main() {
   const flutter = spawn('flutter', flutterArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stdoutBuffer = '';
   let stderrBuffer = '';
-  let vmServiceUrl = null;
+  let vmServiceUrl = null;   // The current active VM URL (updated on each hot restart)
   let publishPending = false;
 
   const vmTimeout = setTimeout(() => {
@@ -551,6 +593,68 @@ async function main() {
   }, VM_URL_TIMEOUT_MS);
 
   flutter.on('error', handleFlutterError);
+
+  // Build the final QR URL by appending previewPort and controlPort as query params
+  function buildFinalUrl(vmUrl) {
+    if (!previewPort && !controlPort) return vmUrl;
+    try {
+      const u = new URL(vmUrl);
+      if (previewPort) u.searchParams.set('previewPort', previewPort);
+      if (controlPort) u.searchParams.set('controlPort', controlPort);
+      return u.toString();
+    } catch (_) {
+      return vmUrl;
+    }
+  }
+
+  // Called the first time a VM URL is found — prints QR and sets up the session
+  function publishUrl(result) {
+    const finalUrl = buildFinalUrl(result.url);
+    vmServiceUrl = finalUrl;
+    clearTimeout(vmTimeout);
+
+    if (jsonOutput) {
+      const payload = { vmServiceUri: vmServiceUrl, deviceId };
+      if (result.replaced) {
+        payload.originalVmServiceUri = result.originalUrl;
+      }
+      if (result.proxied) {
+        payload.proxy = { host: result.proxyHost, port: result.proxyPort };
+      }
+      console.log(JSON.stringify(payload));
+      return;
+    }
+
+    if (!qrOnly) {
+      console.log(chalk.yellow('\nScan this QR with FlutterBridge app:\n'));
+    }
+    qrcode.generate(finalUrl, { small: true });
+    if (!qrOnly) {
+      if (result.proxied) {
+        console.log(chalk.gray(`LAN proxy running at ws://${result.proxyHost}:${result.proxyPort}`));
+        console.log(chalk.gray(`Proxy target: ${result.originalUrl}`));
+      } else if (result.replaced) {
+        console.log(chalk.gray(`Rewrote VM URL for LAN access: ${finalUrl}`));
+        console.log(chalk.gray(`Original VM URL: ${result.originalUrl}`));
+      }
+      console.log(chalk.green(`\nVM URL: ${finalUrl}`));
+    }
+  }
+
+  // Called on subsequent hot restarts — broadcasts new URL to all connected apps
+  function updateUrl(result) {
+    const finalUrl = buildFinalUrl(result.url);
+    vmServiceUrl = finalUrl;
+
+    if (!quiet) {
+      console.log(chalk.cyan('\n🔄 Hot restart detected — broadcasting new VM URL to companion apps...'));
+      console.log(chalk.gray(`New VM URL: ${finalUrl}`));
+    }
+
+    if (controlServer) {
+      controlServer.wss.broadcast({ type: 'vm_url_changed', url: finalUrl });
+    }
+  }
 
   const handleMachineChunk = (buffer, data) => {
     let nextBuffer = buffer + data.toString();
@@ -566,65 +670,32 @@ async function main() {
       const events = Array.isArray(json) ? json : [json];
       for (const event of events) {
         const url = extractVmServiceUri(event);
-        if (url && !vmServiceUrl && !publishPending) {
+        // Accept VM URLs on first connect AND on every subsequent hot restart.
+        // publishPending prevents double-processing when two events fire quickly.
+        if (url && !publishPending) {
+          const isFirstUrl = !vmServiceUrl;
           publishPending = true;
-
-          const publishUrl = (result) => {
-            if (vmServiceUrl) {
-              return;
-            }
-            
-            let finalUrl = result.url;
-            if (previewPort) {
-              try {
-                const u = new URL(finalUrl);
-                u.searchParams.set('previewPort', previewPort);
-                finalUrl = u.toString();
-              } catch(e) {}
-            }
-            
-            vmServiceUrl = finalUrl;
-            clearTimeout(vmTimeout);
-
-            if (jsonOutput) {
-              const payload = { vmServiceUri: vmServiceUrl, deviceId };
-              if (result.replaced) {
-                payload.originalVmServiceUri = result.originalUrl;
-              }
-              if (result.proxied) {
-                payload.proxy = { host: result.proxyHost, port: result.proxyPort };
-              }
-              console.log(JSON.stringify(payload));
-              return;
-            }
-
-            if (!qrOnly) {
-              console.log(chalk.yellow('\nScan this QR with FlutterBridge app:\n'));
-            }
-            qrcode.generate(vmServiceUrl, { small: true });
-            if (!qrOnly) {
-              if (result.proxied) {
-                console.log(chalk.gray(`LAN proxy running at ws://${result.proxyHost}:${result.proxyPort}`));
-                console.log(chalk.gray(`Proxy target: ${result.originalUrl}`));
-              } else if (result.replaced) {
-                console.log(chalk.gray(`Rewrote VM URL for LAN access: ${vmServiceUrl}`));
-                console.log(chalk.gray(`Original VM URL: ${result.originalUrl}`));
-              }
-              console.log(chalk.green(`\nVM URL: ${vmServiceUrl}`));
-            }
-          };
 
           prepareVmServiceUrl(url)
             .then((result) => {
               publishPending = false;
-              publishUrl(result);
+              if (isFirstUrl) {
+                publishUrl(result);
+              } else {
+                updateUrl(result);
+              }
             })
             .catch((err) => {
               publishPending = false;
               if (!quiet) {
                 console.error(chalk.red(`Failed to prepare VM service URL: ${err.message}`));
               }
-              publishUrl({ url, originalUrl: url, replaced: false, proxied: false });
+              const fallback = { url, originalUrl: url, replaced: false, proxied: false };
+              if (isFirstUrl) {
+                publishUrl(fallback);
+              } else {
+                updateUrl(fallback);
+              }
             });
         }
       }
@@ -646,6 +717,12 @@ async function main() {
 
   flutter.on('close', (code) => {
     clearTimeout(vmTimeout);
+
+    // Notify all connected companion apps that Flutter has stopped
+    if (controlServer) {
+      controlServer.wss.broadcast({ type: 'flutter_stopped' });
+    }
+
     if (code && code !== 0) {
       process.exitCode = code;
     }
