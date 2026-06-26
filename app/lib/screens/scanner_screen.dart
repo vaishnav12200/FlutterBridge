@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -22,6 +23,7 @@ class ScannerScreen extends StatefulWidget {
 class _ScannerScreenState extends State<ScannerScreen>
     with TickerProviderStateMixin {
   // ── Controllers ─────────────────────────────────────────────────────────────
+  // late is safe here — only accessed on non-web platforms guarded by kIsWeb
   late final MobileScannerController _camera;
   late final TextEditingController   _urlController;
   late final FocusNode               _urlFocus;
@@ -44,7 +46,10 @@ class _ScannerScreenState extends State<ScannerScreen>
   void initState() {
     super.initState();
 
-    _camera        = MobileScannerController(torchEnabled: false);
+    // MobileScannerController crashes on web — only create on native platforms
+    if (!kIsWeb) {
+      _camera = MobileScannerController(torchEnabled: false);
+    }
     _urlController = TextEditingController();
     _urlFocus      = FocusNode();
 
@@ -86,7 +91,7 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   @override
   void dispose() {
-    _camera.dispose();
+    if (!kIsWeb) _camera.dispose();
     _urlController.dispose();
     _urlFocus.dispose();
     _scanLineCtrl.dispose();
@@ -159,6 +164,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   void _toggleTorch() {
+    if (kIsWeb) return; // No torch on web
     setState(() => _torchOn = !_torchOn);
     _camera.toggleTorch();
   }
@@ -175,10 +181,13 @@ class _ScannerScreenState extends State<ScannerScreen>
         children: [
           // ── Camera + overlay ──────────────────────────────────────────────
           Expanded(
-            child: Stack(
+            child: kIsWeb
+                // ── Web: no camera access, show manual-entry prompt ──────────
+                ? _WebNoCameraWidget()
+                // ── Native: real camera feed ─────────────────────────────────
+                : Stack(
               fit: StackFit.expand,
               children: [
-                // Camera feed
                 MobileScanner(
                   controller: _camera,
                   onDetect: _onDetect,
@@ -186,8 +195,6 @@ class _ScannerScreenState extends State<ScannerScreen>
                     return _CameraErrorWidget(error: error.errorCode.name);
                   },
                 ),
-
-                // Overlay
                 AnimatedBuilder(
                   animation: Listenable.merge([_scanLineAnim, _pulseAnim]),
                   builder: (context, _) => CustomPaint(
@@ -197,16 +204,12 @@ class _ScannerScreenState extends State<ScannerScreen>
                     ),
                   ),
                 ),
-
-                // Hint text above scan area
                 Positioned(
                   top: MediaQuery.of(context).padding.top + kToolbarHeight + 12,
                   left: 24,
                   right: 24,
                   child: _buildHintBanner(),
                 ),
-
-                // Torch button (bottom-left of camera)
                 Positioned(
                   bottom: 16,
                   right: 24,
@@ -641,6 +644,59 @@ class _TorchButton extends StatelessWidget {
           on ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
           color: Colors.white,
           size: 20,
+        ),
+      ),
+    );
+  }
+}
+
+// ── Web: no camera (use manual URL entry) ─────────────────────────────────────
+
+class _WebNoCameraWidget extends StatelessWidget {
+  const _WebNoCameraWidget();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.background,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: AppColors.accentGlow,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.accentDim),
+                ),
+                child: const Icon(Icons.computer_rounded,
+                    color: AppColors.accent, size: 36),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Running on Web',
+                style: GoogleFonts.inter(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Camera QR scanning is not available in the browser.\nPaste the VM URL from your terminal into the field below.',
+                style: GoogleFonts.inter(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.6,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       ),
     );
