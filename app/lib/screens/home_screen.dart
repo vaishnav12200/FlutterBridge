@@ -71,7 +71,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (widget.vmServiceUrl != old.vmServiceUrl &&
         widget.vmServiceUrl != null &&
         widget.vmServiceUrl != VMConnectionManager.instance.currentUrl) {
-      VMConnectionManager.instance.connect(widget.vmServiceUrl!);
+      // Defer until after the current build frame — calling connect() here
+      // synchronously would call notifyListeners() mid-build, causing
+      // "setState() called during build" errors.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => VMConnectionManager.instance.connect(widget.vmServiceUrl!),
+      );
     }
   }
 
