@@ -9,6 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const net = require('net');
+const crypto = require('crypto');
+
+const authToken = crypto.randomBytes(16).toString('hex');
 
 const VM_URL_TIMEOUT_MS = 300000; // 5 minutes (initial gradle builds take time)
 const SERVICE_URI_KEYS = [
@@ -206,7 +209,22 @@ process.on('exit', closeAllProxies);
 // ---------------------------------------------------------------------------
 function startControlServer() {
   return new Promise((resolve, reject) => {
-    const wss = new WebSocket.Server({ port: 0, host: '0.0.0.0' });
+    const wss = new WebSocket.Server({ 
+      port: 0, 
+      host: '0.0.0.0',
+      verifyClient: (info, cb) => {
+        try {
+          const url = new URL(info.req.url, `http://${info.req.headers.host}`);
+          if (url.searchParams.get('token') === authToken) {
+            cb(true);
+          } else {
+            cb(false, 401, 'Unauthorized');
+          }
+        } catch (e) {
+          cb(false, 400, 'Bad Request');
+        }
+      }
+    });
 
     wss.on('listening', () => {
       const port = wss.address().port;
@@ -235,7 +253,22 @@ function startControlServer() {
 function startScreenshotServer(deviceId) {
   return new Promise((resolve, reject) => {
     try {
-      const wss = new WebSocket.Server({ port: 0, host: '0.0.0.0' });
+      const wss = new WebSocket.Server({ 
+        port: 0, 
+        host: '0.0.0.0',
+        verifyClient: (info, cb) => {
+          try {
+            const url = new URL(info.req.url, `http://${info.req.headers.host}`);
+            if (url.searchParams.get('token') === authToken) {
+              cb(true);
+            } else {
+              cb(false, 401, 'Unauthorized');
+            }
+          } catch (e) {
+            cb(false, 400, 'Bad Request');
+          }
+        }
+      });
       let intervalId = null;
       let connections = 0;
 
@@ -601,6 +634,7 @@ async function main() {
       const u = new URL(vmUrl);
       if (previewPort) u.searchParams.set('previewPort', previewPort);
       if (controlPort) u.searchParams.set('controlPort', controlPort);
+      u.searchParams.set('token', authToken);
       return u.toString();
     } catch (_) {
       return vmUrl;

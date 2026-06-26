@@ -94,8 +94,11 @@ class VMConnectionManager extends ChangeNotifier {
     try {
       final uri = Uri.parse(url);
       final pPort = uri.queryParameters['previewPort'];
+      final token = uri.queryParameters['token'];
+
       if (pPort != null) {
         _previewUrl = 'ws://${uri.host}:$pPort';
+        if (token != null) _previewUrl = '$_previewUrl?token=$token';
       } else {
         _previewUrl = null;
       }
@@ -103,7 +106,9 @@ class VMConnectionManager extends ChangeNotifier {
       // Connect to the CLI control channel if a controlPort is present
       final cPort = uri.queryParameters['controlPort'];
       if (cPort != null) {
-        final controlUri = 'ws://${uri.host}:$cPort';
+        var controlUri = 'ws://${uri.host}:$cPort';
+        if (token != null) controlUri = '$controlUri?token=$token';
+        
         if (controlUri != _controlUrl) {
           _connectControl(controlUri);
         }
