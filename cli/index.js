@@ -672,7 +672,19 @@ async function main() {
         const url = extractVmServiceUri(event);
         // Accept VM URLs on first connect AND on every subsequent hot restart.
         // publishPending prevents double-processing when two events fire quickly.
+        // Dedup: Chrome emits a secondary DevTools http:// URL immediately after
+        // the ws:// URL. Ignore it if the path (session token) hasn't changed.
         if (url && !publishPending) {
+          let isSameSession = false;
+          if (vmServiceUrl) {
+            try {
+              const currentPath = new URL(vmServiceUrl).pathname;
+              const newPath = new URL(url).pathname;
+              isSameSession = currentPath === newPath;
+            } catch (_) {}
+          }
+          if (isSameSession) continue;
+
           const isFirstUrl = !vmServiceUrl;
           publishPending = true;
 
