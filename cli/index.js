@@ -226,6 +226,15 @@ function startControlServer() {
       }
     });
 
+    wss.on('connection', (ws, req) => {
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          wss.emit('client_message', msg);
+        } catch (_) {}
+      });
+    });
+
     wss.on('listening', () => {
       const port = wss.address().port;
 
@@ -617,6 +626,15 @@ async function main() {
   let vmServiceUrl = null;   // The current active VM URL (updated on each hot restart)
   let publishPending = false;
 
+  const handleClientMessage = (msg) => {
+    if (msg.type === 'hot_reload') {
+      flutter.stdin.write('r');
+    } else if (msg.type === 'hot_restart') {
+      flutter.stdin.write('R');
+    }
+  };
+  controlWs.wss.on('client_message', handleClientMessage);
+
   const vmTimeout = setTimeout(() => {
     if (!vmServiceUrl) {
       console.error(chalk.red(`Timed out after ${VM_URL_TIMEOUT_MS / 1000}s waiting for VM service URL.`));
@@ -763,6 +781,7 @@ async function main() {
 
   flutter.on('close', (code) => {
     clearTimeout(vmTimeout);
+    controlWs.wss.off('client_message', handleClientMessage);
 
     // Notify all connected companion apps that Flutter has stopped
     if (controlServer) {

@@ -1,6 +1,6 @@
 {
   "name": "@vaishnavkm/flutterbridge",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Bridge your Flutter code to your phone instantly. Wireless development with QR code pairing.",
   "main": "index.js",
   "bin": {

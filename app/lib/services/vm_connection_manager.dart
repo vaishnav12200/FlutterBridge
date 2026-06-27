@@ -453,10 +453,21 @@ class VMConnectionManager extends ChangeNotifier {
     _reloadStart = DateTime.now();
     notifyListeners();
 
-    _send('callServiceExtension', params: {
-      'isolateId': _isolateId,
-      'method': 'ext.flutter.reassemble',
-    });
+    if (_controlChannel != null) {
+      _controlChannel!.sink.add(jsonEncode({'type': 'hot_reload'}));
+      // The CLI will trigger 'flutter run', which emits an app.progress event,
+      // but since we aren't tracking that perfectly yet, assume success shortly.
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (_reloadState == VMReloadState.loading) {
+          _finishReload(success: true);
+        }
+      });
+    } else {
+      _send('callServiceExtension', params: {
+        'isolateId': _isolateId,
+        'method': 'ext.flutter.reassemble',
+      });
+    }
   }
 
   void hotRestart() {
@@ -467,7 +478,16 @@ class VMConnectionManager extends ChangeNotifier {
     _reloadStart = DateTime.now();
     notifyListeners();
 
-    _send('hotRestart', params: {'isolateId': _isolateId});
+    if (_controlChannel != null) {
+      _controlChannel!.sink.add(jsonEncode({'type': 'hot_restart'}));
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (_reloadState == VMReloadState.loading) {
+          _finishReload(success: true);
+        }
+      });
+    } else {
+      _send('hotRestart', params: {'isolateId': _isolateId});
+    }
   }
 
   @override
