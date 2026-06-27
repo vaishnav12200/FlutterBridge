@@ -133,7 +133,7 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   void _accept(String url) {
-    _camera.stop();
+    if (!kIsWeb) _camera.stop();
     _scanLineCtrl.stop();
     _pulseCtrl.stop();
     setState(() {
@@ -154,7 +154,7 @@ class _ScannerScreenState extends State<ScannerScreen>
 
   void _reset() {
     _urlController.clear();
-    _camera.start();
+    if (!kIsWeb) _camera.start();
     _scanLineCtrl.repeat(reverse: true);
     _pulseCtrl.repeat(reverse: true);
     setState(() {
