@@ -620,7 +620,7 @@ async function main() {
     flutterArgs.push(...passthrough);
   }
 
-  const flutter = spawn('flutter', flutterArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const flutter = spawn('flutter', flutterArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
   let stdoutBuffer = '';
   let stderrBuffer = '';
   let vmServiceUrl = null;   // The current active VM URL (updated on each hot restart)
@@ -633,7 +633,9 @@ async function main() {
       flutter.stdin.write('R');
     }
   };
-  controlWs.wss.on('client_message', handleClientMessage);
+  if (controlServer) {
+    controlServer.wss.on('client_message', handleClientMessage);
+  }
 
   const vmTimeout = setTimeout(() => {
     if (!vmServiceUrl) {
@@ -781,7 +783,9 @@ async function main() {
 
   flutter.on('close', (code) => {
     clearTimeout(vmTimeout);
-    controlWs.wss.off('client_message', handleClientMessage);
+    if (controlServer) {
+      controlServer.wss.off('client_message', handleClientMessage);
+    }
 
     // Notify all connected companion apps that Flutter has stopped
     if (controlServer) {
