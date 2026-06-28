@@ -10,6 +10,7 @@ const path = require('path');
 const os = require('os');
 const net = require('net');
 const crypto = require('crypto');
+const http = require('http');
 
 const authToken = crypto.randomBytes(16).toString('hex');
 
@@ -259,6 +260,114 @@ function startControlServer() {
 // ---------------------------------------------------------------------------
 // Screenshot / Live Preview Server
 // ---------------------------------------------------------------------------
+
+let activeCdpWs = null;
+
+async function getChromeDebugWsUrl(port) {
+  return new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}/json`, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const targets = JSON.parse(data);
+          const page = targets.find(t => t.type === 'page' && !t.url.includes('devtools://'));
+          if (page && page.webSocketDebuggerUrl) {
+            resolve(page.webSocketDebuggerUrl);
+          } else {
+            reject(new Error('No suitable page target found'));
+          }
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }).on('error', reject);
+  });
+}
+
+function startScreencastAdb(deviceId, wss) {
+  let intervalId = null;
+  let isCapturing = false;
+
+  intervalId = setInterval(() => {
+    if (isCapturing || wss.clients.size === 0) return;
+    isCapturing = true;
+
+    const adbArgs = deviceId ? ['-s', deviceId, 'exec-out', 'screencap', '-p'] : ['exec-out', 'screencap', '-p'];
+    const child = spawn('adb', adbArgs);
+    const chunks = [];
+    
+    child.stdout.on('data', chunk => chunks.push(chunk));
+    child.on('close', code => {
+      isCapturing = false;
+      if (code === 0 && wss.clients.size > 0) {
+        const buffer = Buffer.concat(chunks);
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(buffer);
+          }
+        });
+      }
+    });
+    child.on('error', () => {
+      isCapturing = false;
+    });
+  }, 500); // ADB is slow, keep 2fps limit
+
+  return () => clearInterval(intervalId);
+}
+
+function startScreencastCdp(debugWsUrl, wss) {
+  if (activeCdpWs) {
+    try { activeCdpWs.close(); } catch (_) {}
+  }
+  const cdpWs = new WebSocket(debugWsUrl);
+  activeCdpWs = cdpWs;
+  let msgId = 1;
+
+  cdpWs.on('open', () => {
+    // Start screencast: JPEG, 60 quality, max width 360px
+    cdpWs.send(JSON.stringify({
+      id: msgId++,
+      method: 'Page.startScreencast',
+      params: { format: 'jpeg', quality: 60, maxWidth: 360 }
+    }));
+  });
+
+  cdpWs.on('message', (data) => {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.method === 'Page.screencastFrame') {
+        const { sessionId, data: base64Data } = msg.params;
+        
+        // Broadcast to clients
+        if (wss.clients.size > 0) {
+          const buffer = Buffer.from(base64Data, 'base64');
+          wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+              client.send(buffer);
+            }
+          });
+        }
+        
+        // Acknowledge frame to receive the next one
+        if (cdpWs.readyState === WebSocket.OPEN) {
+          cdpWs.send(JSON.stringify({
+            id: msgId++,
+            method: 'Page.screencastFrameAck',
+            params: { sessionId }
+          }));
+        }
+      }
+    } catch (_) {}
+  });
+
+  return () => {
+    if (activeCdpWs === cdpWs) activeCdpWs = null;
+    cdpWs.close();
+  };
+}
+
 function startScreenshotServer(deviceId) {
   return new Promise((resolve, reject) => {
     try {
@@ -278,46 +387,42 @@ function startScreenshotServer(deviceId) {
           }
         }
       });
-      let intervalId = null;
+
+      let stopScreencast = null;
       let connections = 0;
+      let activeDebugPort = null;
 
       wss.on('listening', () => {
         const port = wss.address().port;
-        resolve(port);
+        resolve({ wss, port });
       });
 
-      wss.on('error', (err) => {
-        reject(err);
-      });
+      wss.on('error', reject);
 
       wss.on('connection', (ws) => {
         connections++;
         
         if (connections === 1) {
-          intervalId = setInterval(() => {
-            const adbArgs = deviceId ? ['-s', deviceId, 'exec-out', 'screencap', '-p'] : ['exec-out', 'screencap', '-p'];
-            const child = spawn('adb', adbArgs);
-            const chunks = [];
-            
-            child.stdout.on('data', chunk => chunks.push(chunk));
-            child.on('close', code => {
-              if (code === 0 && wss.clients.size > 0) {
-                const buffer = Buffer.concat(chunks);
-                wss.clients.forEach(client => {
-                  if (client.readyState === WebSocket.OPEN) {
-                    client.send(buffer);
-                  }
-                });
-              }
-            });
-          }, 500); // 2 fps polling
+          if (deviceId === 'chrome' && activeDebugPort) {
+            getChromeDebugWsUrl(activeDebugPort)
+              .then(debugWsUrl => {
+                if (connections > 0) { // Ensure still connected
+                  stopScreencast = startScreencastCdp(debugWsUrl, wss);
+                }
+              })
+              .catch(err => {
+                // Ignore silent failure
+              });
+          } else if (deviceId !== 'chrome') {
+            stopScreencast = startScreencastAdb(deviceId, wss);
+          }
         }
 
         ws.on('close', () => {
           connections--;
-          if (connections === 0 && intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
+          if (connections === 0 && stopScreencast) {
+            stopScreencast();
+            stopScreencast = null;
           }
         });
       });
