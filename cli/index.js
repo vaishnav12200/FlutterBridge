@@ -394,7 +394,21 @@ function startScreenshotServer(deviceId) {
 
       wss.on('listening', () => {
         const port = wss.address().port;
-        resolve({ wss, port });
+        resolve({
+          port,
+          setDebugPort: (port) => {
+            activeDebugPort = port;
+            if (deviceId === 'chrome' && connections > 0 && !stopScreencast) {
+              getChromeDebugWsUrl(activeDebugPort)
+                .then(debugWsUrl => {
+                  if (connections > 0) {
+                    stopScreencast = startScreencastCdp(debugWsUrl, wss);
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+        });
       });
 
       wss.on('error', reject);
@@ -703,8 +717,10 @@ async function main() {
   }
 
   let previewPort = null;
+  let previewServer = null;
   try {
-    previewPort = await startScreenshotServer(deviceId);
+    previewServer = await startScreenshotServer(deviceId);
+    previewPort = previewServer.port;
     if (!quiet) console.log(chalk.gray(`Started Live Preview server on port ${previewPort}`));
   } catch (e) {
     if (!quiet) console.warn(chalk.yellow(`Warning: Failed to start Live Preview server: ${e.message}`));
@@ -772,6 +788,15 @@ async function main() {
     vmServiceUrl = finalUrl;
     clearTimeout(vmTimeout);
 
+    if (previewServer && result.originalUrl) {
+      try {
+        const originalUri = new URL(result.originalUrl);
+        if (originalUri.port) {
+          previewServer.setDebugPort(originalUri.port);
+        }
+      } catch (_) {}
+    }
+
     if (jsonOutput) {
       const payload = { vmServiceUri: vmServiceUrl, deviceId };
       if (result.replaced) {
@@ -804,6 +829,15 @@ async function main() {
   function updateUrl(result) {
     const finalUrl = buildFinalUrl(result.url);
     vmServiceUrl = finalUrl;
+
+    if (previewServer && result.originalUrl) {
+      try {
+        const originalUri = new URL(result.originalUrl);
+        if (originalUri.port) {
+          previewServer.setDebugPort(originalUri.port);
+        }
+      } catch (_) {}
+    }
 
     if (!quiet) {
       console.log(chalk.cyan('\n🔄 Hot restart detected — broadcasting new VM URL to companion apps...'));
