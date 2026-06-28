@@ -857,12 +857,25 @@ class _LivePreviewCard extends StatefulWidget {
 class _LivePreviewCardState extends State<_LivePreviewCard> {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
-  Uint8List? _currentFrame;
+  final ValueNotifier<Uint8List?> _currentFrame = ValueNotifier(null);
+
+  // FPS tracking
+  int _frameCount = 0;
+  int _fps = 0;
+  Timer? _fpsTimer;
 
   @override
   void initState() {
     super.initState();
     _connect();
+    _fpsTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          _fps = _frameCount;
+          _frameCount = 0;
+        });
+      }
+    });
   }
 
   @override
@@ -877,6 +890,8 @@ class _LivePreviewCardState extends State<_LivePreviewCard> {
   @override
   void dispose() {
     _cleanup();
+    _fpsTimer?.cancel();
+    _currentFrame.dispose();
     super.dispose();
   }
 
@@ -888,9 +903,11 @@ class _LivePreviewCardState extends State<_LivePreviewCard> {
       _channel = WebSocketChannel.connect(Uri.parse(previewUrl));
       _sub = _channel!.stream.listen((data) {
         if (data is Uint8List) {
-          if (mounted) setState(() => _currentFrame = data);
+          _currentFrame.value = data;
+          _frameCount++;
         } else if (data is List<int>) {
-          if (mounted) setState(() => _currentFrame = Uint8List.fromList(data));
+          _currentFrame.value = Uint8List.fromList(data);
+          _frameCount++;
         }
       });
     } catch (_) {}
@@ -903,56 +920,7 @@ class _LivePreviewCardState extends State<_LivePreviewCard> {
 
   @override
   Widget build(BuildContext context) {
-    Widget screenContent;
-    if (_currentFrame != null) {
-      screenContent = Image.memory(
-        _currentFrame!,
-        gaplessPlayback: true,
-        fit: BoxFit.contain,
-      );
-    } else {
-      screenContent = AnimatedBuilder(
-        animation: widget.shimmerCtrl,
-        builder: (ctx, _) {
-          final pos = -1.0 + 3.0 * widget.shimmerCtrl.value;
-          return Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment(pos - 1, -0.3),
-                end: Alignment(pos, 0.3),
-                colors: const [
-                  Color(0xFF1A1D2E),
-                  Color(0xFF242736),
-                  Color(0xFF2D3148),
-                  Color(0xFF242736),
-                  Color(0xFF1A1D2E),
-                ],
-                stops: const [0.0, 0.2, 0.5, 0.8, 1.0],
-              ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Icons.phone_android_rounded,
-                  size: 36,
-                  color: AppColors.textMuted.withValues(alpha: 0.3),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Waiting for frames...',
-                  style: GoogleFonts.inter(
-                    color: AppColors.textMuted.withValues(alpha: 0.5),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    }
+
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -989,7 +957,7 @@ class _LivePreviewCardState extends State<_LivePreviewCard> {
                   ),
                 ),
                 child: Text(
-                  'Phase 2',
+                  _fps > 0 ? 'Phase 3 • $_fps fps' : 'Phase 3',
                   style: GoogleFonts.inter(
                     color: AppColors.success,
                     fontSize: 10,
@@ -1039,7 +1007,60 @@ class _LivePreviewCardState extends State<_LivePreviewCard> {
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(10),
-                          child: screenContent,
+                          child: ValueListenableBuilder<Uint8List?>(
+                            valueListenable: _currentFrame,
+                            builder: (context, frameData, child) {
+                              if (frameData != null) {
+                                return Image.memory(
+                                  frameData,
+                                  gaplessPlayback: true,
+                                  fit: BoxFit.contain,
+                                  cacheWidth: 360,
+                                );
+                              }
+                              return AnimatedBuilder(
+                                animation: widget.shimmerCtrl,
+                                builder: (ctx, _) {
+                                  final pos = -1.0 + 3.0 * widget.shimmerCtrl.value;
+                                  return Container(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment(pos - 1, -0.3),
+                                        end: Alignment(pos, 0.3),
+                                        colors: const [
+                                          Color(0xFF1A1D2E),
+                                          Color(0xFF242736),
+                                          Color(0xFF2D3148),
+                                          Color(0xFF242736),
+                                          Color(0xFF1A1D2E),
+                                        ],
+                                        stops: const [0.0, 0.2, 0.5, 0.8, 1.0],
+                                      ),
+                                    ),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.phone_android_rounded,
+                                          size: 36,
+                                          color: AppColors.textMuted.withValues(alpha: 0.3),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Text(
+                                          'Waiting for frames...',
+                                          style: GoogleFonts.inter(
+                                            color: AppColors.textMuted.withValues(alpha: 0.5),
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ),

@@ -189,8 +189,10 @@ class VMConnectionManager extends ChangeNotifier {
     try {
       final uri = Uri.parse(newUrl);
       final pPort = uri.queryParameters['previewPort'];
+      final token = uri.queryParameters['token'];
       if (pPort != null) {
         _previewUrl = 'ws://${uri.host}:$pPort';
+        if (token != null) _previewUrl = '$_previewUrl?token=$token';
       }
     } catch (_) {}
 
