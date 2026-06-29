@@ -263,6 +263,23 @@ function startControlServer() {
 
 let activeCdpWs = null;
 
+async function findChromeDebugPort() {
+  return new Promise((resolve, reject) => {
+    const { exec } = require('child_process');
+    exec('ps aux | grep "[c]hrome" | grep "flutter_tools" | grep "remote-debugging-port"', (err, stdout) => {
+      if (err || !stdout) {
+        return reject(new Error('No Flutter Chrome process found'));
+      }
+      const match = stdout.match(/--remote-debugging-port=(\d+)/);
+      if (match && match[1]) {
+        resolve(parseInt(match[1], 10));
+      } else {
+        reject(new Error('remote-debugging-port not found in Chrome args'));
+      }
+    });
+  });
+}
+
 async function getChromeDebugWsUrl(port) {
   return new Promise((resolve, reject) => {
     http.get(`http://127.0.0.1:${port}/json`, (res) => {
@@ -405,18 +422,7 @@ function startScreenshotServer(deviceId) {
         resolve({
           port,
           setDebugPort: (port) => {
-            activeDebugPort = port;
-            if (deviceId === 'chrome' && connections > 0 && !stopScreencast) {
-              getChromeDebugWsUrl(activeDebugPort)
-                .then(debugWsUrl => {
-                  if (connections > 0) {
-                    stopScreencast = startScreencastCdp(debugWsUrl, wss);
-                  }
-                })
-                .catch(err => {
-                  console.warn(chalk.yellow(`Warning: Failed to connect to CDP for Live Preview: ${err.message}`));
-                });
-            }
+            // Unused since we use findChromeDebugPort directly
           }
         });
       });
@@ -427,15 +433,16 @@ function startScreenshotServer(deviceId) {
         connections++;
         
         if (connections === 1) {
-          if (deviceId === 'chrome' && activeDebugPort) {
-            getChromeDebugWsUrl(activeDebugPort)
+          if (deviceId === 'chrome') {
+            findChromeDebugPort()
+              .then(cdpPort => getChromeDebugWsUrl(cdpPort))
               .then(debugWsUrl => {
                 if (connections > 0) { // Ensure still connected
                   stopScreencast = startScreencastCdp(debugWsUrl, wss);
                 }
               })
               .catch(err => {
-                // Ignore silent failure
+                console.warn(chalk.yellow(`Warning: Failed to connect to CDP for Live Preview: ${err.message}`));
               });
           } else if (deviceId !== 'chrome') {
             stopScreencast = startScreencastAdb(deviceId, wss);
