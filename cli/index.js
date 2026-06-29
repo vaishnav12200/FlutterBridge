@@ -275,13 +275,13 @@ async function getChromeDebugWsUrl(port) {
           if (page && page.webSocketDebuggerUrl) {
             resolve(page.webSocketDebuggerUrl);
           } else {
-            reject(new Error('No suitable page target found'));
+            reject(new Error('No suitable page target found. Targets: ' + JSON.stringify(targets, null, 2)));
           }
         } catch (e) {
-          reject(e);
+          reject(new Error('Failed to parse CDP /json response: ' + e.message));
         }
       });
-    }).on('error', reject);
+    }).on('error', err => reject(new Error('HTTP GET /json failed: ' + err.message)));
   });
 }
 
@@ -358,8 +358,16 @@ function startScreencastCdp(debugWsUrl, wss) {
             params: { sessionId }
           }));
         }
+      } else if (msg.error) {
+        console.error(chalk.red(`CDP Error: ${JSON.stringify(msg.error)}`));
       }
-    } catch (_) {}
+    } catch (err) {
+      console.error(chalk.red(`Failed to parse CDP message: ${err.message}`));
+    }
+  });
+
+  cdpWs.on('error', (err) => {
+    console.error(chalk.red(`CDP WebSocket error: ${err.message}`));
   });
 
   return () => {
@@ -405,7 +413,9 @@ function startScreenshotServer(deviceId) {
                     stopScreencast = startScreencastCdp(debugWsUrl, wss);
                   }
                 })
-                .catch(() => {});
+                .catch(err => {
+                  console.warn(chalk.yellow(`Warning: Failed to connect to CDP for Live Preview: ${err.message}`));
+                });
             }
           }
         });
